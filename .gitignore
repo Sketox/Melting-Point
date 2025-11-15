@@ -1,0 +1,81 @@
+# =========================
+# Python / general
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+*.pyd
+*.dll
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+
+# Entornos con herramientas
+.env/
+.venv*/
+.env*/
+
+# =========================
+# Jupyter / Notebooks
+# =========================
+.ipynb_checkpoints/
+*.ipynb_save
+*.nbconvert.ipynb
+
+# =========================
+# Logs / cache
+# =========================
+*.log
+*.tmp
+*.bak
+*.swp
+*.swo
+
+# =========================
+# VS Code / IDEs
+# =========================
+.vscode/
+.idea/
+*.code-workspace
+
+# =========================
+# Sistema operativo
+# =========================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# =========================
+# Datos y artefactos de modelo
+# =========================
+
+# Datos crudos de Kaggle (mejor no subirlos al repo)
+data/raw/
+# Si quieres subir los CSV, comenta la línea anterior.
+
+# Datos procesados pesados / generados
+data/processed/test_processed.csv
+
+# Modelos entrenados
+backend/models/model.joblib
+*.joblib
+*.pkl
+
+# Submissions de Kaggle
+submissions/
+*.zip
+*.7z
+*.tar
+*.tar.gz
+
+# =========================
+# Otros
+# =========================
+reports/figures/*.png
+reports/figures/*.jpg
+reports/figures/*.jpeg
