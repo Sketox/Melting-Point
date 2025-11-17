@@ -13,9 +13,9 @@ def main():
     # Detectar la raíz del proyecto (carpeta MeltingPoint)
     project_root = Path(__file__).resolve().parents[1]
 
-    # Rutas de entrada
-    train_path = project_root / "data" / "raw" / "train.csv"
-    test_path = project_root / "data" / "raw" / "test.csv"
+    # 🔹 Ahora usamos los CSV procesados con RDKit
+    train_path = project_root / "data" / "processed" / "train_rdkit.csv"
+    test_path = project_root / "data" / "processed" / "test_rdkit.csv"
 
     # Rutas de salida
     model_path = project_root / "backend" / "models" / "model.joblib"
@@ -26,10 +26,10 @@ def main():
     model_path.parent.mkdir(parents=True, exist_ok=True)
     processed_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"📂 Cargando train.csv desde: {train_path}")
+    print(f"📂 Cargando train_rdkit.csv desde: {train_path}")
     train_df = pd.read_csv(train_path)
 
-    print(f"📂 Cargando test.csv desde: {test_path}")
+    print(f"📂 Cargando test_rdkit.csv desde: {test_path}")
     test_df = pd.read_csv(test_path)
 
     # Definir columnas de features (todas excepto id, SMILES, Tm)
@@ -58,9 +58,13 @@ def main():
         random_state=42,
     )
 
-    print("🚀 Entrenando RandomForestRegressor (baseline)...")
+    print("🚀 Entrenando RandomForestRegressor (Groups + RDKit)...")
     model = RandomForestRegressor(
-        n_estimators=200,
+        n_estimators=600,      # más árboles
+        max_depth=None,        # que el bosque pueda crecer libremente
+        min_samples_split=4,
+        min_samples_leaf=1,
+        max_features="sqrt",
         random_state=42,
         n_jobs=-1,
     )
@@ -68,10 +72,10 @@ def main():
 
     # Evaluación con MAE y MAPE
     train_pred = model.predict(X_train)
-    val_pred  = model.predict(X_val)
+    val_pred = model.predict(X_val)
 
     train_mae = mean_absolute_error(y_train, train_pred)
-    val_mae   = mean_absolute_error(y_val, val_pred)
+    val_mae = mean_absolute_error(y_val, val_pred)
 
     # Cálculo manual del MAPE para evitar divisiones por cero
     def mape(y_true, y_pred):
@@ -80,9 +84,9 @@ def main():
         return np.mean(np.abs((y_true - y_pred) / (y_true + eps))) * 100
 
     train_mape = mape(y_train, train_pred)
-    val_mape   = mape(y_val, val_pred)
+    val_mape = mape(y_val, val_pred)
 
-    print("\n📊 Métricas del modelo:")
+    print("\n📊 Métricas del modelo (Groups + RDKit):")
     print(f"   • MAE (train):      {train_mae:.4f}")
     print(f"   • MAE (validation): {val_mae:.4f}")
     print(f"   • MAPE (train):     {train_mape:.2f}%")

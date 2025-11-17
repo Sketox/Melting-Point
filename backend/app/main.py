@@ -1,3 +1,5 @@
+from typing import List
+
 from fastapi import FastAPI, HTTPException
 
 from .ml_service import MLService
@@ -44,3 +46,25 @@ def predict_by_id(request: PredictByIdRequest):
         raise HTTPException(status_code=404, detail=str(e))
 
     return PredictResponse(id=request.id, Tm_pred=pred)
+
+
+@app.get("/predict-all", response_model=List[PredictResponse])
+def predict_all():
+    """
+    Devuelve las predicciones de Tm para TODOS los IDs presentes en test_processed.csv.
+    Formato: [{ "id": xxx, "Tm_pred": yyy }, ...]
+    """
+    if ml_service is None:
+        raise HTTPException(
+            status_code=500,
+            detail="MLService no está inicializado.",
+        )
+
+    results = ml_service.predict_all()
+
+    # Convertimos la lista de (id, pred) a lista de PredictResponse
+    responses: List[PredictResponse] = [
+        PredictResponse(id=sample_id, Tm_pred=pred) for sample_id, pred in results
+    ]
+
+    return responses
