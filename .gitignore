@@ -79,3 +79,4 @@ submissions/
 reports/figures/*.png
 reports/figures/*.jpg
 reports/figures/*.jpeg
+backend/app/__pycache__
