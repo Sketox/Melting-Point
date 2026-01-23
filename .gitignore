@@ -80,3 +80,4 @@ reports/figures/*.png
 reports/figures/*.jpg
 reports/figures/*.jpeg
 backend/app/__pycache__
+backend/app/__pycache__
