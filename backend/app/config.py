@@ -10,5 +10,8 @@ PROJECT_ROOT = BASE_DIR.parent
 # Ruta al modelo entrenado
 MODEL_PATH = BASE_DIR / "models" / "model.joblib"
 
-# Ruta al CSV de test procesado
+# Ruta al CSV de test procesado (DATASET OFICIAL - READ ONLY)
 TEST_PROCESSED_PATH = PROJECT_ROOT / "data" / "processed" / "test_processed.csv"
+
+# Ruta al CSV de compuestos de usuarios (USER DATA - READ/WRITE)
+USER_COMPOUNDS_PATH = PROJECT_ROOT / "data" / "user_compounds.csv"
