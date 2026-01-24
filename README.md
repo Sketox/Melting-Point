@@ -2,478 +2,267 @@
 
 <div align="center">
 
-![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688?style=for-the-badge&logo=fastapi&logoColor=white)
-![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)
-![scikit-learn](https://img.shields.io/badge/scikit--learn-ML-F7931E?style=for-the-badge&logo=scikit-learn&logoColor=white)
-![Pandas](https://img.shields.io/badge/Pandas-Data-150458?style=for-the-badge&logo=pandas&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.121+-009688?style=for-the-badge&logo=fastapi&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![ChemProp](https://img.shields.io/badge/ChemProp-1.6.1-orange?style=for-the-badge)
+![RDKit](https://img.shields.io/badge/RDKit-2025.9-blue?style=for-the-badge)
 
-**API REST para predicción de puntos de fusión moleculares**
+**REST API for molecular melting point prediction using ChemProp D-MPNN**
 
-[Instalación](#-instalación) • [Endpoints](#-endpoints) • [Uso](#-uso) • [Modelo](#-modelo) • [Estructura](#-estructura)
+[Installation](#-installation) • [Endpoints](#-endpoints) • [Model](#-model) • [Troubleshooting](#-troubleshooting)
 
 </div>
 
 ---
 
-## 📋 Descripción
+## 📋 Description
 
-API REST desarrollada con **FastAPI** que proporciona predicciones de puntos de fusión (Tm) para moléculas del dataset de la competencia [Kaggle Melting Point](https://www.kaggle.com/competitions/melting-point).
+REST API built with **FastAPI** that provides melting point (Tm) predictions for molecules using a trained **ChemProp D-MPNN** model with 5-fold cross-validation. Developed for the [Kaggle Thermophysical Property Competition](https://www.kaggle.com/competitions/playground-series-s5e6).
 
-### ✨ Características
+### ✨ Features
 
-- 🚀 **Alto rendimiento** - FastAPI con soporte asíncrono
-- 📖 **Documentación automática** - Swagger UI y ReDoc integrados
-- 🔒 **Validación de datos** - Esquemas Pydantic para request/response
-- 🔄 **CORS habilitado** - Listo para conectar con frontends
-- 🧠 **ML integrado** - Modelo pre-entrenado cargado al iniciar
+- 🚀 **High Performance** - FastAPI with async support
+- 🧠 **ChemProp D-MPNN** - Graph neural network specialized for molecular properties
+- 🔬 **RDKit Integration** - Complete SMILES validation and molecular descriptors
+- 📊 **Analytics Endpoints** - Statistics, distributions, and functional group analysis
+- 👤 **User Compounds** - Add custom molecules with real-time predictions
+- 📖 **Auto Documentation** - Swagger UI and ReDoc included
 
 ---
 
-## 🚀 Instalación
+## 🚀 Installation
 
-### Prerrequisitos
+### Prerequisites
 
-- Python 3.10 o superior
-- pip (gestor de paquetes)
+- Python 3.11+ (tested on 3.14)
+- pip
 
-### Paso a paso
+### Step by Step
 
 ```bash
-# 1. Navegar al directorio del backend
+# 1. Navigate to backend directory
 cd MeltingPoint/backend
 
-# 2. Crear entorno virtual
-python -m venv venv
+# 2. Create virtual environment
+python -m venv .venv
 
-# 3. Activar entorno virtual
+# 3. Activate virtual environment
 # Windows (PowerShell):
-venv\Scripts\activate
-# Windows (CMD):
-venv\Scripts\activate.bat
+.venv\Scripts\activate
 # Linux/Mac:
-source venv/bin/activate
+source .venv/bin/activate
 
-# 4. Instalar dependencias
+# 4. Install dependencies
 pip install -r requirements.txt
 
-# 5. Ejecutar el servidor
+# 5. ⚠️ REQUIRED: Apply PyTorch 2.6+ compatibility patch
+python patch_chemprop_torch.py
+
+# 6. Run the server
 uvicorn app.main:app --reload --port 8000
 ```
 
-### Verificar instalación
+### Verify Installation
 
-```bash
-# El servidor debería mostrar:
-INFO:     Uvicorn running on http://127.0.0.1:8000
-INFO:     Application startup complete.
+You should see in the logs:
+```
+INFO: ChemProp 1.6.1 detected correctly.
+INFO: ChemProp enabled with 5 checkpoints (ensemble).
+INFO: Application startup complete.
 ```
 
-Abre en tu navegador: **http://localhost:8000/docs**
+Open in browser: **http://localhost:8000/docs**
 
 ---
 
+## 📦 Requirements
 
-### Instalar dependencias manualmente
+```txt
+# Backend API
+fastapi>=0.104.0
+uvicorn>=0.24.0
+pydantic>=2.0.0
+python-multipart>=0.0.6
 
-```bash
-pip install fastapi uvicorn pandas joblib scikit-learn pydantic
+# Data & ML
+pandas>=2.0.0
+numpy==1.26.4
+scikit-learn>=1.3.0
+joblib>=1.3.0
+
+# Chemistry
+rdkit>=2023.03.1
+chemprop==1.6.1
+torch>=2.0.0
 ```
 
 ---
 
-## 🔌 Endpoints
+## 🧠 Model
+
+### ChemProp D-MPNN Architecture
+
+| Parameter | Value |
+|-----------|-------|
+| **Type** | D-MPNN (Directed Message Passing Neural Network) |
+| **Hidden Size** | 300 |
+| **Depth** | 6 layers |
+| **Dropout** | 0.1 |
+| **Epochs** | 50 |
+| **Batch Size** | 32 |
+| **Validation** | 5-Fold Cross-Validation |
+
+### Performance Metrics
+
+| Fold | Validation MAE | Test MAE | Best Epoch |
+|------|----------------|----------|------------|
+| 0 | 29.63 K | 26.15 K | 30 |
+| 1 | 29.26 K | 27.64 K | 41 |
+| 2 | 27.22 K | 35.03 K | 45 |
+| 3 | 26.57 K | 27.35 K | 48 |
+| 4 | 31.31 K | 28.09 K | 28 |
+| **Overall** | - | **28.85 ± 3.16 K** | - |
+
+### Example Predictions
+
+| Molecule | SMILES | Predicted | Actual |
+|----------|--------|-----------|--------|
+| Water | `O` | 272.17 K | 273.15 K ✓ |
+| Ethanol | `CCO` | ~159 K | 159 K ✓ |
+
+---
+
+## 📌 API Endpoints
 
 ### Base URL
-
 ```
 http://localhost:8000
 ```
 
----
+### Info & Health
 
-### 🏠 Root
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/` | API information |
+| GET | `/health` | Health check |
+| GET | `/model-info` | Model metrics and configuration |
 
-Verifica que el servidor está corriendo.
+### SMILES Validation
 
-```http
-GET /
-```
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/validate-smiles` | Validate SMILES structure with RDKit |
 
-**Response:**
-```json
-{
-  "message": "Melting Point API",
-  "status": "running",
-  "docs": "/docs"
-}
-```
+### Predictions
 
----
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/predict-all` | All test set predictions |
+| POST | `/predict-by-id` | Prediction by molecule ID |
 
-### 💚 Health Check
+### Analytics
 
-Verifica el estado del servidor y la disponibilidad del modelo.
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/stats` | Descriptive statistics (mean, std, min, max, median, q25, q75) |
+| GET | `/predictions/range` | Filter by temperature range |
+| GET | `/predictions/distribution` | Distribution by temperature categories |
+| GET | `/predictions/by-functional-group` | Analysis by functional groups |
+| GET | `/predictions/by-molecule-size` | Analysis by molecular size |
 
-```http
-GET /health
-```
+### User Compounds
 
-**Response:**
-```json
-{
-  "status": "ok"
-}
-```
-
-**cURL:**
-```bash
-curl http://localhost:8000/health
-```
-
-**PowerShell:**
-```powershell
-Invoke-RestMethod -Uri "http://localhost:8000/health"
-```
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/compounds` | List saved compounds |
+| POST | `/compounds` | Create compound (validates SMILES + predicts Tm) |
+| DELETE | `/compounds/{id}` | Delete compound |
 
 ---
 
-### 🔮 Predict by ID
-
-Obtiene la predicción del punto de fusión para un ID específico del dataset de test.
-
-```http
-POST /predict-by-id
-Content-Type: application/json
-```
-
-**Request Body:**
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| `id` | integer | ID de la molécula en el dataset (requerido) |
-
-```json
-{
-  "id": 69
-}
-```
-
-**Response:**
-```json
-{
-  "id": 69,
-  "Tm_pred": 123.69
-}
-```
-
-**Errores:**
-| Código | Descripción |
-|--------|-------------|
-| 404 | ID no encontrado en el dataset |
-| 500 | Modelo no inicializado |
-
-**cURL:**
-```bash
-curl -X POST "http://localhost:8000/predict-by-id" \
-  -H "Content-Type: application/json" \
-  -d '{"id": 42}'
-```
-
-**PowerShell:**
-```powershell
-$body = @{ id = 42 } | ConvertTo-Json
-Invoke-RestMethod -Uri "http://localhost:8000/predict-by-id" -Method Post -Body $body -ContentType "application/json"
-```
-
-**Python:**
-```python
-import requests
-
-response = requests.post(
-    "http://localhost:8000/predict-by-id",
-    json={"id": 42}
-)
-print(response.json())
-# {"id": 42, "Tm_pred": 234.76}
-```
-
----
-
-### 📊 Predict All
-
-Obtiene las predicciones de Tm para **todos** los IDs del dataset de test.
-
-```http
-GET /predict-all
-```
-
-**Response:**
-```json
-[
-  { "id": 1, "Tm_pred": 341.51 },
-  { "id": 2, "Tm_pred": 372.55 },
-  { "id": 3, "Tm_pred": 205.82 },
-  ...
-]
-```
-
-**cURL:**
-```bash
-curl http://localhost:8000/predict-all
-```
-
-**PowerShell:**
-```powershell
-Invoke-RestMethod -Uri "http://localhost:8000/predict-all"
-```
-
-**Python:**
-```python
-import requests
-
-response = requests.get("http://localhost:8000/predict-all")
-predictions = response.json()
-
-print(f"Total predicciones: {len(predictions)}")
-for pred in predictions[:5]:
-    print(f"ID {pred['id']}: {pred['Tm_pred']:.2f} K")
-```
-
----
-
-## 📖 Documentación Interactiva
-
-FastAPI genera documentación automática:
-
-| URL | Descripción |
-|-----|-------------|
-| http://localhost:8000/docs | **Swagger UI** - Interfaz interactiva para probar endpoints |
-| http://localhost:8000/redoc | **ReDoc** - Documentación en formato legible |
-| http://localhost:8000/openapi.json | **OpenAPI Schema** - Especificación JSON |
-
----
-
-## 🧠 Modelo
-
-### Información del Modelo
-
-| Parámetro | Valor |
-|-----------|-------|
-| **Algoritmo** | RandomForestRegressor / ChemProp |
-| **Input** | Features procesadas de SMILES |
-| **Output** | Punto de fusión en Kelvin (K) |
-| **Archivo** | `models/model.joblib` |
-
-### Pipeline de Predicción
-
-```
-┌─────────────┐     ┌──────────────────┐     ┌─────────────┐
-│   Request   │     │    MLService     │     │   Response  │
-│   { id: n } │ ──► │  1. Buscar ID    │ ──► │  { Tm_pred }│
-│             │     │  2. Extraer feat │     │             │
-│             │     │  3. Predecir     │     │             │
-└─────────────┘     └──────────────────┘     └─────────────┘
-```
-
-### Carga del Modelo
-
-El modelo se carga automáticamente al iniciar la aplicación:
-
-```python
-@app.on_event("startup")
-def startup_event() -> None:
-    global ml_service
-    ml_service = MLService()  # Carga modelo y datos
-```
-
----
-
-## 📁 Estructura
+## 🔧 Project Structure
 
 ```
 backend/
-│
 ├── 📁 app/
-│   ├── __init__.py          # Inicializador del módulo
-│   ├── main.py              # Aplicación FastAPI y endpoints
-│   ├── ml_service.py        # Servicio de Machine Learning
-│   ├── schemas.py           # Esquemas Pydantic (request/response)
-│   └── config.py            # Configuración de rutas
+│   ├── __init__.py
+│   ├── main.py           # FastAPI app and endpoints
+│   ├── ml_service.py     # ML service with ChemProp integration
+│   ├── schemas.py        # Pydantic models
+│   └── config.py         # Configuration and paths
+│
+├── 📁 data/
+│   └── user_compounds.csv  # User compounds (auto-generated)
 │
 ├── 📁 models/
-│   ├── model.joblib         # Modelo entrenado serializado
-│   └── 📁 model_chemprop/   # Modelo ChemProp (alternativo)
-│       ├── fold_0/
-│       ├── fold_1/
-│       ├── fold_2/
-│       ├── fold_3/
-│       ├── fold_4/
+│   ├── model.joblib        # Sklearn fallback model
+│   └── 📁 model_chemprop/  # Trained ChemProp model (5 folds)
+│       ├── fold_0/model_0/model.pt
+│       ├── fold_1/model_0/model.pt
+│       ├── fold_2/model_0/model.pt
+│       ├── fold_3/model_0/model.pt
+│       ├── fold_4/model_0/model.pt
 │       └── args.json
 │
-├── requirements.txt         # Dependencias Python
-├── .gitignore              # Archivos ignorados por Git
-└── README.md               # Este archivo
+├── patch_chemprop_torch.py  # ⚠️ Required for PyTorch 2.6+
+├── requirements.txt
+├── CLAUDE.md
+└── README.md
 ```
 
 ---
 
-## ⚙️ Configuración
+## ⚠️ Troubleshooting
 
-### Archivo `config.py`
-
-```python
-from pathlib import Path
-
-# Directorio base (backend/)
-BASE_DIR = Path(__file__).resolve().parent.parent
-
-# Directorio raíz del proyecto (MeltingPoint/)
-PROJECT_ROOT = BASE_DIR.parent
-
-# Ruta al modelo entrenado
-MODEL_PATH = BASE_DIR / "models" / "model.joblib"
-
-# Ruta al CSV de test procesado
-TEST_PROCESSED_PATH = PROJECT_ROOT / "data" / "processed" / "test_processed.csv"
-```
-
-
----
-
-## 🔒 CORS
-
-El backend tiene CORS habilitado para permitir conexiones desde el frontend:
-
-```python
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",    # Next.js
-        "http://127.0.0.1:3000",
-        "*",                         # Desarrollo
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-```
-
----
-
-## 🛠️ Desarrollo
-
-### Ejecutar en modo desarrollo
-
-```bash
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-| Flag | Descripción |
-|------|-------------|
-| `--reload` | Recarga automática al detectar cambios |
-| `--host 0.0.0.0` | Acepta conexiones externas |
-| `--port 8000` | Puerto del servidor |
-
-
-### Con Gunicorn (Linux)
-
-```bash
-gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000
-```
+| Problem | Cause | Solution |
+|---------|-------|----------|
+| "Weights only load failed" | PyTorch 2.6+ compatibility | Run `python patch_chemprop_torch.py` |
+| Water predicts 161 K (not 272 K) | ChemProp not working | Verify patch was applied, check logs |
+| Slow predictions (10-30s) | Normal ChemProp behavior | Model loads from disk each time |
+| "multiprocessing_context" error | Windows incompatibility | Already handled with `num_workers=0` |
 
 ---
 
 ## 🧪 Testing
 
-### Probar endpoints manualmente
-
 ```bash
 # Health check
 curl http://localhost:8000/health
 
-# Predicción por ID
-curl -X POST http://localhost:8000/predict-by-id \
+# Validate SMILES
+curl -X POST "http://localhost:8000/validate-smiles" \
   -H "Content-Type: application/json" \
-  -d '{"id": 1}'
+  -d '{"smiles": "O"}'
 
-# Todas las predicciones (primeras 3)
-curl http://localhost:8000/predict-all | python -m json.tool | head -20
-```
+# Create compound (triggers ChemProp prediction)
+curl -X POST "http://localhost:8000/compounds" \
+  -H "Content-Type: application/json" \
+  -d '{"smiles": "O", "name": "Water"}'
+# Expected: ~272.17 K
 
-
----
-
-## ❗ Solución de Problemas
-
-### Error: `ModuleNotFoundError: No module named 'app'`
-
-**Causa:** Estás ejecutando desde el directorio incorrecto.
-
-**Solución:**
-```bash
-cd MeltingPoint/backend
-uvicorn app.main:app --reload
+# Get statistics
+curl http://localhost:8000/stats
 ```
 
 ---
 
-### Error: `FileNotFoundError: Modelo no encontrado`
+## 📖 Interactive Documentation
 
-**Causa:** El archivo `model.joblib` no existe.
-
-**Solución:** Verifica que existe:
-```bash
-ls models/model.joblib
-```
+| URL | Description |
+|-----|-------------|
+| http://localhost:8000/docs | **Swagger UI** - Interactive testing |
+| http://localhost:8000/redoc | **ReDoc** - Readable documentation |
 
 ---
 
-### Error: `CORS policy blocked`
+## 📄 License
 
-**Causa:** El frontend no puede conectar por restricciones CORS.
-
-**Solución:** Verifica que `main.py` tiene el middleware CORS configurado.
-
----
-
-### Error: `Connection refused`
-
-**Causa:** El servidor no está corriendo.
-
-**Solución:**
-```bash
-# Verificar que uvicorn está corriendo
-curl http://localhost:8000/health
-```
-
----
-
-## 📊 Esquemas de Datos
-
-### PredictByIdRequest
-
-```python
-class PredictByIdRequest(BaseModel):
-    id: int  # ID de la molécula
-```
-
-### PredictResponse
-
-```python
-class PredictResponse(BaseModel):
-    id: int        # ID de la molécula
-    Tm_pred: float # Punto de fusión predicho (Kelvin)
-```
-
-## 📄 Licencia
-
-Este proyecto está bajo la Licencia MIT.
+MIT License
 
 ---
 
 <div align="center">
 
-**Desarrollado para la competencia Kaggle Melting Point** 🧪
-
-[⬆ Volver arriba](#-melting-point-api)
+**Developed for the Kaggle Thermophysical Property Competition** 🧪
 
 </div>
