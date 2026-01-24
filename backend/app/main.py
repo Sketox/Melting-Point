@@ -305,6 +305,15 @@ def create_compound(request: CompoundCreateRequest):
             status_code=400, 
             detail=f"SMILES inválido: {str(e)}"
         )
+    except Exception as e:
+        # Log del error para debugging
+        import traceback
+        print(f"Error creating compound: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error interno al crear compuesto: {str(e)}"
+        )
     
     return CompoundResponse(
         id=compound["id"],

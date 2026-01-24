@@ -28,11 +28,15 @@ except ImportError:
     print("WARNING: RDKit no está instalado. La validación de SMILES estará limitada.")
 
 # ChemProp para predicciones
+CHEMPROP_AVAILABLE = False
+CHEMPROP_VERSION = None
+
 try:
-    from chemprop import train, predict
+    import chemprop
+    CHEMPROP_VERSION = getattr(chemprop, '__version__', '1.x')
     CHEMPROP_AVAILABLE = True
+    print(f"INFO: ChemProp {CHEMPROP_VERSION} detectado correctamente.")
 except ImportError:
-    CHEMPROP_AVAILABLE = False
     print("WARNING: ChemProp no está instalado. Se usará modelo alternativo.")
 
 from .config import MODEL_PATH, TEST_PROCESSED_PATH, USER_COMPOUNDS_PATH, CHEMPROP_MODEL_DIR, SMILES_CSV_PATH
@@ -72,11 +76,41 @@ class MLService:
 
         # Cargar ChemProp si está disponible
         self.chemprop_model_dir = Path(CHEMPROP_MODEL_DIR) if CHEMPROP_MODEL_DIR else None
-        self.use_chemprop = (
-            CHEMPROP_AVAILABLE and 
-            self.chemprop_model_dir and 
-            self.chemprop_model_dir.exists()
-        )
+        self.use_chemprop = False
+        self.chemprop_checkpoints = []
+        
+        if CHEMPROP_AVAILABLE and self.chemprop_model_dir:
+            if self.chemprop_model_dir.exists():
+                # Buscar checkpoints en los folds
+                fold_dirs = list(self.chemprop_model_dir.glob("fold_*"))
+                if fold_dirs:
+                    for fold_dir in sorted(fold_dirs):
+                        # Buscar model.pt en cada fold
+                        model_file = fold_dir / "model_0" / "model.pt"
+                        if not model_file.exists():
+                            model_file = fold_dir / "model.pt"
+                        if model_file.exists():
+                            self.chemprop_checkpoints.append(str(model_file))
+                    
+                    if self.chemprop_checkpoints:
+                        self.use_chemprop = True
+                        print(f"INFO: ChemProp habilitado con {len(self.chemprop_checkpoints)} checkpoints (ensemble).")
+                    else:
+                        print(f"WARNING: No se encontraron model.pt en {self.chemprop_model_dir}")
+                else:
+                    # Buscar model.pt directamente
+                    model_file = self.chemprop_model_dir / "model.pt"
+                    if model_file.exists():
+                        self.chemprop_checkpoints = [str(model_file)]
+                        self.use_chemprop = True
+                        print(f"INFO: ChemProp habilitado con 1 checkpoint.")
+                    else:
+                        print(f"WARNING: Directorio ChemProp existe pero no contiene modelos: {self.chemprop_model_dir}")
+            else:
+                print(f"WARNING: Directorio ChemProp no existe: {self.chemprop_model_dir}")
+        else:
+            if not CHEMPROP_AVAILABLE:
+                print("INFO: ChemProp no disponible, usando modelo sklearn como fallback.")
 
         # Carga test procesado
         self.test_df = pd.read_csv(csv_path)
@@ -178,19 +212,41 @@ class MLService:
 
     def _load_user_compounds(self) -> None:
         """Carga o crea el DataFrame de compuestos de usuarios."""
-        if self.user_compounds_path.exists():
-            self.user_compounds_df = pd.read_csv(self.user_compounds_path)
-        else:
+        try:
+            # Asegurar que el directorio existe
+            self.user_compounds_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            if self.user_compounds_path.exists():
+                self.user_compounds_df = pd.read_csv(self.user_compounds_path)
+                # Asegurar que tiene todas las columnas necesarias
+                required_cols = ['id', 'smiles', 'name', 'Tm_pred', 'Tm_celsius', 
+                                'uncertainty', 'created_at', 'source']
+                for col in required_cols:
+                    if col not in self.user_compounds_df.columns:
+                        self.user_compounds_df[col] = None
+            else:
+                self.user_compounds_df = pd.DataFrame(columns=[
+                    'id', 'smiles', 'name', 'Tm_pred', 'Tm_celsius', 
+                    'uncertainty', 'created_at', 'source'
+                ])
+                self.user_compounds_df.to_csv(self.user_compounds_path, index=False)
+        except Exception as e:
+            print(f"WARNING: Error cargando user_compounds: {e}")
+            # Crear DataFrame vacío en memoria
             self.user_compounds_df = pd.DataFrame(columns=[
                 'id', 'smiles', 'name', 'Tm_pred', 'Tm_celsius', 
                 'uncertainty', 'created_at', 'source'
             ])
-            self.user_compounds_path.parent.mkdir(parents=True, exist_ok=True)
-            self.user_compounds_df.to_csv(self.user_compounds_path, index=False)
 
     def _save_user_compounds(self) -> None:
         """Guarda el DataFrame de compuestos de usuarios."""
-        self.user_compounds_df.to_csv(self.user_compounds_path, index=False)
+        try:
+            # Asegurar que el directorio existe
+            self.user_compounds_path.parent.mkdir(parents=True, exist_ok=True)
+            self.user_compounds_df.to_csv(self.user_compounds_path, index=False)
+        except Exception as e:
+            print(f"WARNING: Error guardando user_compounds: {e}")
+            # No lanzar excepción, los datos están en memoria
 
     def _get_next_user_id(self) -> str:
         """Genera el siguiente ID para compuestos de usuario."""
@@ -311,47 +367,128 @@ class MLService:
     def _predict_with_chemprop(self, smiles: str) -> Optional[float]:
         """
         Predice el punto de fusión usando ChemProp.
+        Soporta ensemble de múltiples folds.
         
         Returns:
             Predicción en Kelvin o None si falla
         """
-        if not self.use_chemprop:
+        if not self.use_chemprop or not self.chemprop_checkpoints:
+            print("DEBUG: ChemProp no habilitado o sin checkpoints")
             return None
         
         try:
-            # Crear archivo temporal con SMILES
             import tempfile
+            
+            # Crear archivo temporal con SMILES
             with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
                 f.write("smiles\n")
                 f.write(f"{smiles}\n")
                 temp_input = f.name
             
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
-                temp_output = f.name
+            predictions = []
             
-            # Ejecutar predicción
-            from chemprop.args import PredictArgs
-            from chemprop.train import make_predictions
+            try:
+                # Intentar con la API moderna de chemprop (v1.5+)
+                from chemprop.train import make_predictions
+                from chemprop.args import PredictArgs
+                
+                # Usar checkpoint_dir para ensemble
+                args = PredictArgs().parse_args([
+                    '--test_path', temp_input,
+                    '--checkpoint_dir', str(self.chemprop_model_dir),
+                    '--no_cuda'  # Usar CPU para evitar problemas
+                ])
+                
+                preds = make_predictions(args=args)
+                
+                if preds and len(preds) > 0:
+                    # preds es una lista de listas, tomar el promedio si hay múltiples
+                    if isinstance(preds[0], (list, tuple)):
+                        predictions.append(float(preds[0][0]))
+                    else:
+                        predictions.append(float(preds[0]))
+                        
+            except Exception as e1:
+                print(f"DEBUG: Error con API moderna de ChemProp: {e1}")
+                
+                # Intentar con API alternativa
+                try:
+                    from chemprop.utils import load_checkpoint
+                    from chemprop.features import MolGraph
+                    from chemprop.data import MoleculeDataLoader, MoleculeDatapoint, MoleculeDataset
+                    import torch
+                    
+                    # Cargar cada checkpoint y predecir
+                    for checkpoint_path in self.chemprop_checkpoints:
+                        model = load_checkpoint(checkpoint_path)
+                        model.eval()
+                        
+                        # Crear dataset con un solo SMILES
+                        datapoint = MoleculeDatapoint(smiles=[smiles])
+                        dataset = MoleculeDataset([datapoint])
+                        
+                        with torch.no_grad():
+                            # Obtener predicción
+                            batch = dataset[0]
+                            pred = model([batch])
+                            if pred is not None:
+                                predictions.append(float(pred[0].item()))
+                                
+                except Exception as e2:
+                    print(f"DEBUG: Error con API alternativa de ChemProp: {e2}")
+                    
+                    # Último intento: usar subprocess
+                    try:
+                        import subprocess
+                        import json
+                        
+                        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+                            temp_output = f.name
+                        
+                        result = subprocess.run([
+                            'chemprop_predict',
+                            '--test_path', temp_input,
+                            '--checkpoint_dir', str(self.chemprop_model_dir),
+                            '--preds_path', temp_output,
+                            '--no_cuda'
+                        ], capture_output=True, text=True, timeout=30)
+                        
+                        if result.returncode == 0:
+                            # Leer predicciones del archivo de salida
+                            import csv
+                            with open(temp_output, 'r') as f:
+                                reader = csv.DictReader(f)
+                                for row in reader:
+                                    # El nombre de la columna de predicción suele ser 'target' o el nombre de la tarea
+                                    for key in ['target', 'Tm', 'prediction', 'pred']:
+                                        if key in row:
+                                            predictions.append(float(row[key]))
+                                            break
+                        
+                        os.unlink(temp_output)
+                        
+                    except Exception as e3:
+                        print(f"DEBUG: Error con subprocess ChemProp: {e3}")
             
-            args = PredictArgs().parse_args([
-                '--test_path', temp_input,
-                '--checkpoint_dir', str(self.chemprop_model_dir),
-                '--preds_path', temp_output
-            ])
+            # Limpiar archivo temporal de entrada
+            try:
+                os.unlink(temp_input)
+            except:
+                pass
             
-            preds = make_predictions(args)
+            # Retornar promedio de predicciones (ensemble)
+            if predictions:
+                avg_pred = sum(predictions) / len(predictions)
+                print(f"DEBUG: ChemProp predicción exitosa: {avg_pred:.2f} K (ensemble de {len(predictions)} modelos)")
+                return avg_pred
             
-            # Limpiar archivos temporales
-            os.unlink(temp_input)
-            os.unlink(temp_output)
-            
-            if preds and len(preds) > 0:
-                return float(preds[0][0])
-            
+            print("DEBUG: No se obtuvieron predicciones de ChemProp")
             return None
             
         except Exception as e:
             print(f"Error en predicción ChemProp: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     def _predict_with_descriptors(self, smiles: str) -> Optional[float]:
@@ -501,24 +638,31 @@ class MLService:
             raise SMILESValidationError(validation["error"])
         
         # Usar SMILES canónico
-        canonical_smiles = validation["canonical_smiles"]
+        canonical_smiles = validation["canonical_smiles"] or smiles
         
         # Intentar predicción con ChemProp primero
-        Tm_pred = self._predict_with_chemprop(canonical_smiles)
+        Tm_pred = None
+        try:
+            Tm_pred = self._predict_with_chemprop(canonical_smiles)
+        except Exception as e:
+            print(f"ChemProp prediction failed: {e}")
         
         # Si ChemProp no está disponible, usar descriptores
         if Tm_pred is None:
-            Tm_pred = self._predict_with_descriptors(canonical_smiles)
+            try:
+                Tm_pred = self._predict_with_descriptors(canonical_smiles)
+            except Exception as e:
+                print(f"Descriptor prediction failed: {e}")
         
         # Si todavía no hay predicción, usar estimación basada en propiedades
         if Tm_pred is None:
             # Estimación basada en peso molecular y otros factores
-            mol_weight = validation.get("molecular_weight", 100)
-            num_atoms = validation.get("num_atoms", 5)
+            mol_weight = validation.get("molecular_weight") or 100.0
+            num_atoms = validation.get("num_atoms") or 5
             
             # Fórmula empírica simple (en producción usar modelo real)
             # Basada en correlaciones observadas en compuestos orgánicos
-            base_temp = 150 + (mol_weight * 0.5) + (num_atoms * 2)
+            base_temp = 150 + (float(mol_weight) * 0.5) + (int(num_atoms) * 2)
             Tm_pred = float(np.clip(base_temp, 100, 600))
         
         compound_id = self._get_next_user_id()
