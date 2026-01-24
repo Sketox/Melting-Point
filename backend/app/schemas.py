@@ -1,155 +1,42 @@
+"""
+schemas.py - Esquemas Pydantic para la API.
+
+ACTUALIZADO:
+- ValidateSmilesRequest/Response para validación de SMILES
+- ModelInfoResponse para información del modelo
+- CompoundResponse con campo de incertidumbre
+"""
+
+from typing import List, Optional, Any
 from pydantic import BaseModel, Field
-from typing import List, Optional
-from datetime import datetime
 
 
 # ============================================
-# REQUEST SCHEMAS
+# REQUEST MODELS
 # ============================================
 
 class PredictByIdRequest(BaseModel):
     """Request para predicción por ID."""
-    id: int = Field(..., description="ID de la molécula en el dataset", ge=1)
-
-
-class RangeFilterRequest(BaseModel):
-    """Request para filtrar por rango de temperatura."""
-    min_tm: float = Field(..., description="Temperatura mínima en Kelvin")
-    max_tm: float = Field(..., description="Temperatura máxima en Kelvin")
+    id: int = Field(..., description="ID de la molécula (1-667)", ge=1)
 
 
 class CompoundCreateRequest(BaseModel):
-    """Request para crear un nuevo compuesto de usuario."""
+    """Request para crear un compuesto de usuario."""
     smiles: str = Field(..., description="Estructura SMILES de la molécula", min_length=1)
     name: str = Field(..., description="Nombre del compuesto", min_length=1)
 
 
+class ValidateSmilesRequest(BaseModel):
+    """Request para validar un SMILES."""
+    smiles: str = Field(..., description="String SMILES a validar")
+
+
 # ============================================
-# RESPONSE SCHEMAS
+# RESPONSE MODELS - Basic
 # ============================================
 
-class PredictResponse(BaseModel):
-    """Response básica de predicción."""
-    id: int
-    Tm_pred: float
-
-
-class PredictResponseWithCelsius(BaseModel):
-    """Response de predicción con temperatura en Celsius."""
-    id: int
-    Tm_pred: float = Field(..., description="Temperatura en Kelvin")
-    Tm_celsius: float = Field(..., description="Temperatura en Celsius")
-
-
-# --- Stats ---
-class StatsResponse(BaseModel):
-    """Estadísticas del dataset."""
-    count: int = Field(..., description="Número total de muestras")
-    mean: float = Field(..., description="Media de Tm")
-    std: float = Field(..., description="Desviación estándar")
-    min: float = Field(..., description="Valor mínimo")
-    max: float = Field(..., description="Valor máximo")
-    median: float = Field(..., description="Mediana")
-    q25: float = Field(..., description="Percentil 25")
-    q75: float = Field(..., description="Percentil 75")
-    variance: float = Field(..., description="Varianza")
-    range: float = Field(..., description="Rango (max - min)")
-
-
-# --- Range Filter ---
-class RangeFilter(BaseModel):
-    """Filtro aplicado."""
-    min_tm: float
-    max_tm: float
-
-
-class RangeResponse(BaseModel):
-    """Response de filtro por rango."""
-    filter: RangeFilter
-    count: int = Field(..., description="Cantidad de moléculas en el rango")
-    percentage: float = Field(..., description="Porcentaje del total")
-    predictions: List[PredictResponse]
-
-
-# --- User Compounds ---
-class CompoundResponse(BaseModel):
-    """Response de un compuesto de usuario."""
-    id: str = Field(..., description="ID único del compuesto (USR_XXX)")
-    smiles: str = Field(..., description="Estructura SMILES")
-    name: str = Field(..., description="Nombre del compuesto")
-    Tm_pred: float = Field(..., description="Temperatura predicha en Kelvin")
-    Tm_celsius: float = Field(..., description="Temperatura predicha en Celsius")
-    created_at: str = Field(..., description="Fecha de creación")
-    source: str = Field(default="user_submitted", description="Origen del dato")
-
-
-class CompoundsListResponse(BaseModel):
-    """Response lista de compuestos de usuarios."""
-    total: int
-    compounds: List[CompoundResponse]
-
-
-class DeleteResponse(BaseModel):
-    """Response de eliminación."""
-    message: str
-    deleted_id: str
-
-
-# --- Functional Groups ---
-class FunctionalGroupStats(BaseModel):
-    """Estadísticas de un grupo funcional."""
-    name: str = Field(..., description="Nombre del grupo funcional")
-    pattern: str = Field(..., description="Patrón SMILES del grupo")
-    count: int = Field(..., description="Cantidad de moléculas")
-    avg_tm: float = Field(..., description="Tm promedio")
-    min_tm: float = Field(..., description="Tm mínimo")
-    max_tm: float = Field(..., description="Tm máximo")
-
-
-class FunctionalGroupsResponse(BaseModel):
-    """Response de análisis por grupos funcionales."""
-    total_molecules: int
-    groups: List[FunctionalGroupStats]
-
-
-# --- Distribution Categories ---
-class DistributionCategory(BaseModel):
-    """Categoría de distribución de temperatura."""
-    name: str = Field(..., description="Nombre de la categoría")
-    description: str = Field(..., description="Descripción")
-    range_min: float = Field(..., description="Límite inferior del rango")
-    range_max: float = Field(..., description="Límite superior del rango")
-    count: int = Field(..., description="Cantidad de moléculas")
-    percentage: float = Field(..., description="Porcentaje del total")
-
-
-class DistributionResponse(BaseModel):
-    """Response de distribución por categorías."""
-    total: int
-    categories: List[DistributionCategory]
-
-
-# --- Molecule Size Analysis ---
-class MoleculeSizeGroup(BaseModel):
-    """Grupo por tamaño de molécula."""
-    name: str = Field(..., description="Nombre del grupo")
-    smiles_length_min: int = Field(..., description="Longitud mínima de SMILES")
-    smiles_length_max: int = Field(..., description="Longitud máxima de SMILES")
-    count: int = Field(..., description="Cantidad de moléculas")
-    avg_tm: float = Field(..., description="Tm promedio")
-    min_tm: float = Field(..., description="Tm mínimo")
-    max_tm: float = Field(..., description="Tm máximo")
-
-
-class MoleculeSizeResponse(BaseModel):
-    """Response de análisis por tamaño molecular."""
-    total_molecules: int
-    size_groups: List[MoleculeSizeGroup]
-
-
-# --- Root/Health ---
 class RootResponse(BaseModel):
-    """Response del endpoint raíz."""
+    """Respuesta del endpoint raíz."""
     message: str
     status: str
     version: str
@@ -158,7 +45,152 @@ class RootResponse(BaseModel):
 
 
 class HealthResponse(BaseModel):
-    """Response del health check."""
+    """Respuesta del health check."""
     status: str
     model_loaded: bool
     dataset_size: int
+
+
+class ModelInfoResponse(BaseModel):
+    """Información del modelo ML."""
+    name: str = Field(..., description="Nombre del modelo")
+    type: str = Field(..., description="Tipo de modelo")
+    mae: float = Field(..., description="Mean Absolute Error en Kelvin")
+    mae_std: float = Field(..., description="Desviación estándar del MAE")
+    folds: int = Field(..., description="Número de folds en cross-validation")
+    epochs: int = Field(..., description="Épocas de entrenamiento")
+    hidden_size: int = Field(..., description="Tamaño de capas ocultas")
+    depth: int = Field(..., description="Profundidad del modelo")
+    uncertainty_interval: str = Field(..., description="Intervalo de incertidumbre")
+
+
+class ValidateSmilesResponse(BaseModel):
+    """Respuesta de validación de SMILES."""
+    valid: bool = Field(..., description="Si el SMILES es válido")
+    canonical_smiles: Optional[str] = Field(None, description="SMILES canónico")
+    num_atoms: Optional[int] = Field(None, description="Número de átomos")
+    molecular_weight: Optional[float] = Field(None, description="Peso molecular")
+    error: Optional[str] = Field(None, description="Mensaje de error si es inválido")
+    warning: Optional[str] = Field(None, description="Advertencia opcional")
+
+
+# ============================================
+# RESPONSE MODELS - Predictions
+# ============================================
+
+class PredictResponse(BaseModel):
+    """Respuesta de predicción."""
+    id: int
+    Tm_pred: float = Field(..., description="Punto de fusión predicho en Kelvin")
+    smiles: Optional[str] = Field(None, description="Estructura SMILES (si disponible)")
+
+
+class StatsResponse(BaseModel):
+    """Estadísticas del dataset."""
+    count: int
+    mean: float
+    std: float
+    min: float
+    max: float
+    median: float
+    q25: float
+    q75: float
+    variance: float
+    range: float
+
+
+class RangeFilter(BaseModel):
+    """Filtro de rango aplicado."""
+    min_tm: float
+    max_tm: float
+
+
+class RangeResponse(BaseModel):
+    """Respuesta de predicciones filtradas por rango."""
+    filter: RangeFilter
+    count: int
+    percentage: float
+    predictions: List[PredictResponse]
+
+
+# ============================================
+# RESPONSE MODELS - User Compounds
+# ============================================
+
+class CompoundResponse(BaseModel):
+    """Respuesta de compuesto de usuario."""
+    id: str = Field(..., description="ID del compuesto (ej: USR_001)")
+    smiles: str = Field(..., description="Estructura SMILES")
+    name: str = Field(..., description="Nombre del compuesto")
+    Tm_pred: float = Field(..., description="Punto de fusión predicho (K)")
+    Tm_celsius: float = Field(..., description="Punto de fusión en Celsius")
+    uncertainty: str = Field("±29 K", description="Intervalo de incertidumbre")
+    created_at: str = Field(..., description="Fecha de creación ISO")
+    source: str = Field(..., description="Fuente del compuesto")
+
+
+class CompoundsListResponse(BaseModel):
+    """Lista de compuestos de usuario."""
+    total: int
+    compounds: List[CompoundResponse]
+
+
+class DeleteResponse(BaseModel):
+    """Respuesta de eliminación."""
+    message: str
+    deleted_id: str
+
+
+# ============================================
+# RESPONSE MODELS - Analytics
+# ============================================
+
+class FunctionalGroupStats(BaseModel):
+    """Estadísticas de un grupo funcional."""
+    name: str
+    pattern: str
+    count: int
+    avg_tm: float
+    min_tm: float
+    max_tm: float
+
+
+class FunctionalGroupsResponse(BaseModel):
+    """Respuesta de análisis por grupos funcionales."""
+    total_molecules: int
+    groups: List[FunctionalGroupStats]
+    note: Optional[str] = Field(None, description="Nota sobre la fuente de datos")
+
+
+class DistributionCategory(BaseModel):
+    """Categoría de distribución de temperatura."""
+    name: str
+    description: str
+    range_min: float
+    range_max: float
+    count: int
+    percentage: float
+
+
+class DistributionResponse(BaseModel):
+    """Respuesta de distribución por categorías."""
+    total: int
+    categories: List[DistributionCategory]
+
+
+class MoleculeSizeGroup(BaseModel):
+    """Grupo por tamaño molecular."""
+    name: str
+    smiles_length_min: int
+    smiles_length_max: int
+    count: int
+    avg_tm: float
+    min_tm: float
+    max_tm: float
+
+
+class MoleculeSizeResponse(BaseModel):
+    """Respuesta de análisis por tamaño molecular."""
+    total_molecules: int
+    size_groups: List[MoleculeSizeGroup]
+    note: Optional[str] = Field(None, description="Nota sobre la fuente de datos")

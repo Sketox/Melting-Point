@@ -1,17 +1,44 @@
+"""
+config.py - Configuración de rutas y constantes para el backend.
+"""
+
+import os
 from pathlib import Path
 
-# Este archivo se carga cuando levantas FastAPI desde la carpeta backend.
-# BASE_DIR = carpeta backend
+# Directorio base del backend
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# PROJECT_ROOT = carpeta raíz del proyecto (MeltingPoint)
-PROJECT_ROOT = BASE_DIR.parent
+# Rutas de modelos
+MODEL_PATH = os.getenv(
+    "MODEL_PATH", 
+    str(BASE_DIR / "models" / "model.joblib")
+)
 
-# Ruta al modelo entrenado
-MODEL_PATH = BASE_DIR / "models" / "model.joblib"
+CHEMPROP_MODEL_DIR = os.getenv(
+    "CHEMPROP_MODEL_DIR",
+    str(BASE_DIR / "models" / "model_chemprop")
+)
 
-# Ruta al CSV de test procesado (DATASET OFICIAL - READ ONLY)
-TEST_PROCESSED_PATH = PROJECT_ROOT / "data" / "processed" / "test_processed.csv"
+# Rutas de datos
+DATA_DIR = BASE_DIR.parent / "data"
 
-# Ruta al CSV de compuestos de usuarios (USER DATA - READ/WRITE)
-USER_COMPOUNDS_PATH = PROJECT_ROOT / "data" / "user_compounds.csv"
+TEST_PROCESSED_PATH = os.getenv(
+    "TEST_PROCESSED_PATH",
+    str(DATA_DIR / "processed" / "test_processed.csv")
+)
+
+# Archivo con SMILES mapeados a IDs (opcional)
+SMILES_CSV_PATH = os.getenv(
+    "SMILES_CSV_PATH",
+    str(DATA_DIR / "processed" / "test_smiles.csv")
+)
+
+# Compuestos de usuarios
+USER_COMPOUNDS_PATH = os.getenv(
+    "USER_COMPOUNDS_PATH",
+    str(BASE_DIR / "data" / "user_compounds.csv")
+)
+
+# Métricas del modelo (basado en entrenamiento)
+MODEL_MAE = 28.85  # Mean Absolute Error en Kelvin
+MODEL_MAE_STD = 3.16  # Desviación estándar del MAE
