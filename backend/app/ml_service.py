@@ -376,110 +376,97 @@ class MLService:
             print("DEBUG: ChemProp no habilitado o sin checkpoints")
             return None
         
+        import tempfile
+        import csv
+        
+        temp_input = None
+        temp_output = None
+        
         try:
-            import tempfile
-            
-            # Crear archivo temporal con SMILES
+            # Crear archivos temporales
             with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
                 f.write("smiles\n")
                 f.write(f"{smiles}\n")
                 temp_input = f.name
             
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+                temp_output = f.name
+            
             predictions = []
             
+            # Método 1: Usar API de ChemProp con num_workers=0 para evitar multiprocessing
             try:
-                # Intentar con la API moderna de chemprop (v1.5+)
                 from chemprop.train import make_predictions
                 from chemprop.args import PredictArgs
                 
-                # Usar checkpoint_dir para ensemble
                 args = PredictArgs().parse_args([
                     '--test_path', temp_input,
+                    '--preds_path', temp_output,
                     '--checkpoint_dir', str(self.chemprop_model_dir),
-                    '--no_cuda'  # Usar CPU para evitar problemas
+                    '--no_cuda',
+                    '--num_workers', '0'  # Evitar problemas de multiprocessing
                 ])
                 
                 preds = make_predictions(args=args)
                 
                 if preds and len(preds) > 0:
-                    # preds es una lista de listas, tomar el promedio si hay múltiples
                     if isinstance(preds[0], (list, tuple)):
                         predictions.append(float(preds[0][0]))
                     else:
                         predictions.append(float(preds[0]))
+                    
+                    print(f"DEBUG: ChemProp API exitosa: {predictions[-1]:.2f} K")
+                        
+            except SystemExit:
+                # ChemProp a veces llama sys.exit()
+                print("DEBUG: ChemProp sys.exit, leyendo archivo de salida...")
+                try:
+                    if os.path.exists(temp_output) and os.path.getsize(temp_output) > 0:
+                        with open(temp_output, 'r') as f:
+                            reader = csv.DictReader(f)
+                            for row in reader:
+                                for key in ['target', 'Tm', 'pred', 'prediction']:
+                                    if key in row and row[key]:
+                                        predictions.append(float(row[key]))
+                                        print(f"DEBUG: Leído de archivo: {predictions[-1]:.2f} K")
+                                        break
+                except Exception as read_err:
+                    print(f"DEBUG: Error leyendo archivo: {read_err}")
                         
             except Exception as e1:
-                print(f"DEBUG: Error con API moderna de ChemProp: {e1}")
+                print(f"DEBUG: Error API ChemProp: {e1}")
                 
-                # Intentar con API alternativa
+                # Método 2: Subprocess como fallback
                 try:
-                    from chemprop.utils import load_checkpoint
-                    from chemprop.features import MolGraph
-                    from chemprop.data import MoleculeDataLoader, MoleculeDatapoint, MoleculeDataset
-                    import torch
+                    import subprocess
                     
-                    # Cargar cada checkpoint y predecir
-                    for checkpoint_path in self.chemprop_checkpoints:
-                        model = load_checkpoint(checkpoint_path)
-                        model.eval()
+                    result = subprocess.run([
+                        'chemprop_predict',
+                        '--test_path', temp_input,
+                        '--checkpoint_dir', str(self.chemprop_model_dir),
+                        '--preds_path', temp_output,
+                        '--no_cuda',
+                        '--num_workers', '0'
+                    ], capture_output=True, text=True, timeout=120)
+                    
+                    if result.returncode == 0 and os.path.exists(temp_output):
+                        with open(temp_output, 'r') as f:
+                            reader = csv.DictReader(f)
+                            for row in reader:
+                                for key in ['target', 'Tm', 'pred', 'prediction']:
+                                    if key in row and row[key]:
+                                        predictions.append(float(row[key]))
+                                        print(f"DEBUG: Subprocess exitoso: {predictions[-1]:.2f} K")
+                                        break
+                    else:
+                        print(f"DEBUG: Subprocess falló")
                         
-                        # Crear dataset con un solo SMILES
-                        datapoint = MoleculeDatapoint(smiles=[smiles])
-                        dataset = MoleculeDataset([datapoint])
-                        
-                        with torch.no_grad():
-                            # Obtener predicción
-                            batch = dataset[0]
-                            pred = model([batch])
-                            if pred is not None:
-                                predictions.append(float(pred[0].item()))
-                                
                 except Exception as e2:
-                    print(f"DEBUG: Error con API alternativa de ChemProp: {e2}")
-                    
-                    # Último intento: usar subprocess
-                    try:
-                        import subprocess
-                        import json
-                        
-                        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
-                            temp_output = f.name
-                        
-                        result = subprocess.run([
-                            'chemprop_predict',
-                            '--test_path', temp_input,
-                            '--checkpoint_dir', str(self.chemprop_model_dir),
-                            '--preds_path', temp_output,
-                            '--no_cuda'
-                        ], capture_output=True, text=True, timeout=30)
-                        
-                        if result.returncode == 0:
-                            # Leer predicciones del archivo de salida
-                            import csv
-                            with open(temp_output, 'r') as f:
-                                reader = csv.DictReader(f)
-                                for row in reader:
-                                    # El nombre de la columna de predicción suele ser 'target' o el nombre de la tarea
-                                    for key in ['target', 'Tm', 'prediction', 'pred']:
-                                        if key in row:
-                                            predictions.append(float(row[key]))
-                                            break
-                        
-                        os.unlink(temp_output)
-                        
-                    except Exception as e3:
-                        print(f"DEBUG: Error con subprocess ChemProp: {e3}")
+                    print(f"DEBUG: Error subprocess: {e2}")
             
-            # Limpiar archivo temporal de entrada
-            try:
-                os.unlink(temp_input)
-            except:
-                pass
-            
-            # Retornar promedio de predicciones (ensemble)
             if predictions:
                 avg_pred = sum(predictions) / len(predictions)
-                print(f"DEBUG: ChemProp predicción exitosa: {avg_pred:.2f} K (ensemble de {len(predictions)} modelos)")
+                print(f"DEBUG: ChemProp predicción final: {avg_pred:.2f} K")
                 return avg_pred
             
             print("DEBUG: No se obtuvieron predicciones de ChemProp")
@@ -490,6 +477,14 @@ class MLService:
             import traceback
             traceback.print_exc()
             return None
+            
+        finally:
+            for temp_file in [temp_input, temp_output]:
+                if temp_file:
+                    try:
+                        os.unlink(temp_file)
+                    except:
+                        pass
 
     def _predict_with_descriptors(self, smiles: str) -> Optional[float]:
         """
