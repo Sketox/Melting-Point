@@ -9,7 +9,7 @@
 
 **REST API for molecular melting point prediction using ChemProp D-MPNN**
 
-[Installation](#-installation) • [Endpoints](#-endpoints) • [Model](#-model) • [Troubleshooting](#-troubleshooting)
+[Installation](#-installation) • [Endpoints](#-api-endpoints) • [Model](#-model) • [Troubleshooting](#️-troubleshooting)
 
 </div>
 
@@ -84,9 +84,11 @@ uvicorn>=0.24.0
 pydantic>=2.0.0
 python-multipart>=0.0.6
 
-# Data & ML
+# Data Processing
 pandas>=2.0.0
 numpy==1.26.4
+
+# Machine Learning
 scikit-learn>=1.3.0
 joblib>=1.3.0
 
@@ -251,7 +253,6 @@ curl http://localhost:8000/stats
 | URL | Description |
 |-----|-------------|
 | http://localhost:8000/docs | **Swagger UI** - Interactive testing |
-| http://localhost:8000/redoc | **ReDoc** - Readable documentation |
 
 ---
 
