@@ -34,10 +34,23 @@ from .schemas import (
     ModelInfoResponse,
 )
 
+# Importar rutas de Supabase
+from .supabase import supabase_router
+
+# Importar rutas de autenticación y MongoDB
+from .auth import (
+    auth_router,
+    user_predictions_router,
+    get_async_database,
+    create_indexes,
+    test_mongodb_connection,
+    close_mongodb_connection
+)
+
 app = FastAPI(
     title="Melting Point API",
     description="""
-    🧪 API para predecir el punto de fusión (Tm) de compuestos orgánicos.
+    API para predecir el punto de fusión (Tm) de compuestos orgánicos.
     
     ## Características
     - Predicciones de punto de fusión en Kelvin
@@ -75,12 +88,37 @@ app.add_middleware(
 
 ml_service: MLService | None = None
 
+# Incluir rutas de Supabase
+app.include_router(supabase_router)
+
+# Incluir rutas de autenticación y predicciones de usuario
+app.include_router(auth_router)
+app.include_router(user_predictions_router)
+
 
 @app.on_event("startup")
-def startup_event() -> None:
-    """Carga el modelo y el CSV procesado al iniciar la aplicación."""
+async def startup_event() -> None:
+    """Carga el modelo, CSV y conecta a MongoDB al iniciar la aplicación."""
     global ml_service
     ml_service = MLService()
+    
+    # Conectar a MongoDB y crear índices
+    try:
+        db = get_async_database()
+        await create_indexes()
+        connection_ok = await test_mongodb_connection()
+        if connection_ok:
+            print("✓ MongoDB conectado y listo")
+        else:
+            print("⚠️ MongoDB no disponible - funcionalidades de usuario deshabilitadas")
+    except Exception as e:
+        print(f"⚠️ Error al conectar MongoDB: {e}")
+
+
+@app.on_event("shutdown")
+async def shutdown_event() -> None:
+    """Cierra las conexiones al apagar la aplicación."""
+    await close_mongodb_connection()
 
 
 # ============================================
@@ -92,11 +130,11 @@ def root():
     🏠 Endpoint raíz con información del API.
     """
     return RootResponse(
-        message="Melting Point API",
+        message="Melting Point API - Now with Supabase & Authentication!",
         status="running",
-        version="2.0.0",
+        version="2.1.0",
         docs="/docs",
-        endpoints_count=14  # Actualizamos el conteo
+        endpoints_count=21
     )
 
 
@@ -106,7 +144,7 @@ def root():
 @app.get("/health", response_model=HealthResponse, tags=["Info"])
 def health():
     """
-    💚 Health check del servidor.
+     Health check del servidor.
     """
     return HealthResponse(
         status="ok",
