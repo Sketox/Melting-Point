@@ -1,1 +1,2 @@
 id,smiles,name,Tm_pred,Tm_celsius,uncertainty,created_at,source
+USR_001,CC(=O)Oc1ccccc1C(=O)O,Aspirina,266.08,-7.07,±28.9 K,2026-02-01T18:05:29.650906,user_submitted

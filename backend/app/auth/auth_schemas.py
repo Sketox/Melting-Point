@@ -2,7 +2,7 @@
 Schemas para autenticación y usuarios
 """
 
-from pydantic import BaseModel, EmailStr, Field, validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional, List
 from datetime import datetime
 from bson import ObjectId
@@ -43,16 +43,18 @@ class UserRegisterRequest(BaseModel):
     """Schema para registro de usuario"""
     username: str = Field(..., min_length=3, max_length=50)
     email: EmailStr
-    password: str = Field(..., min_length=8, max_length=100)
+    password: str = Field(..., min_length=8, max_length=72, description="Password (8-72 caracteres)")
     full_name: Optional[str] = Field(None, max_length=100)
     
-    @validator('username')
+    @field_validator('username')
+    @classmethod
     def username_alphanumeric(cls, v):
         if not v.replace('_', '').replace('-', '').isalnum():
             raise ValueError('Username debe ser alfanumérico (se permiten _ y -)')
         return v.lower()
     
-    @validator('password')
+    @field_validator('password')
+    @classmethod
     def password_strength(cls, v):
         if len(v) < 8:
             raise ValueError('Password debe tener al menos 8 caracteres')
@@ -74,7 +76,8 @@ class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str = Field(..., min_length=8, max_length=100)
     
-    @validator('new_password')
+    @field_validator('new_password')
+    @classmethod
     def password_strength(cls, v):
         if len(v) < 8:
             raise ValueError('Password debe tener al menos 8 caracteres')
@@ -113,9 +116,10 @@ class UserResponse(BaseModel):
     predictions_count: int = 0
     is_active: bool = True
     
-    class Config:
-        populate_by_name = True
-        json_encoders = {ObjectId: str}
+    model_config = {
+        "populate_by_name": True,
+        "json_encoders": {ObjectId: str}
+    }
 
 
 class LoginResponse(BaseModel):
@@ -150,9 +154,10 @@ class UserInDB(BaseModel):
     is_verified: bool = False
     predictions_count: int = 0
     
-    class Config:
-        populate_by_name = True
-        json_encoders = {ObjectId: str}
+    model_config = {
+        "populate_by_name": True,
+        "json_encoders": {ObjectId: str}
+    }
 
 
 class UserPredictionInDB(BaseModel):
@@ -169,9 +174,10 @@ class UserPredictionInDB(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     metadata: Optional[dict] = None
     
-    class Config:
-        populate_by_name = True
-        json_encoders = {ObjectId: str}
+    model_config = {
+        "populate_by_name": True,
+        "json_encoders": {ObjectId: str}
+    }
 
 
 class SessionInDB(BaseModel):
@@ -183,6 +189,7 @@ class SessionInDB(BaseModel):
     expires_at: datetime
     is_active: bool = True
     
-    class Config:
-        populate_by_name = True
-        json_encoders = {ObjectId: str}
+    model_config = {
+        "populate_by_name": True,
+        "json_encoders": {ObjectId: str}
+    }
