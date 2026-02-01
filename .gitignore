@@ -20,6 +20,11 @@ env/
 .venv*/
 .env*/
 
+# Variables de entorno (credenciales sensibles)
+.env
+backend/.env
+*.env
+
 # =========================
 # Jupyter / Notebooks
 # =========================
