@@ -26,20 +26,62 @@ from .mongodb_client import get_async_database, Collections
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/auth", tags=["Authentication"])
+router = APIRouter(
+    prefix="/auth",
+    tags=["🔐 Authentication"]
+)
 
 
-@router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/register",
+    response_model=RegisterResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="📝 Registrar Usuario",
+    description="Crea una nueva cuenta de usuario con autenticación JWT."
+)
 async def register(user_data: UserRegisterRequest):
     """
-    📝 Registrar nuevo usuario
+    Registra un nuevo usuario en el sistema.
     
-    Crea una cuenta nueva con:
-    - Username único (3-50 caracteres)
+    **Validaciones automáticas:**
+    - Username único (3-50 caracteres, sin espacios)
     - Email válido y único
-    - Password segura (mínimo 8 caracteres, 1 número, 1 mayúscula)
+    - Password segura (mínimo 8 caracteres, 1 mayúscula, 1 número)
     
-    Retorna el usuario creado y un token JWT.
+    **Request body:**
+    ```json
+    {
+        "username": "usuario123",
+        "email": "usuario@email.com",
+        "password": "Password123",
+        "full_name": "Juan Pérez"
+    }
+    ```
+    
+    **Response (201 Created):**
+    ```json
+    {
+        "user": {
+            "id": "507f1f77bcf86cd799439011",
+            "username": "usuario123",
+            "email": "usuario@email.com",
+            "full_name": "Juan Pérez",
+            "created_at": "2026-02-01T10:30:00",
+            "predictions_count": 0,
+            "is_active": true
+        },
+        "token": {
+            "access_token": "eyJhbGciOiJIUzI1NiIs...",
+            "token_type": "bearer",
+            "expires_in": 1800
+        },
+        "message": "Usuario registrado exitosamente"
+    }
+    ```
+    
+    **Errores comunes:**
+    - 400: Username o email ya existe
+    - 422: Validación fallida (password débil, email inválido)
     """
     try:
         # Crear usuario
@@ -88,20 +130,58 @@ async def register(user_data: UserRegisterRequest):
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
         logger.error(f"Error en registro: {e}")
+        logger.error(f"Traceback: {error_trace}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error al registrar usuario"
+            detail=f"Error al registrar usuario: {str(e)}"
         )
 
 
-@router.post("/login", response_model=LoginResponse)
+@router.post(
+    "/login",
+    response_model=LoginResponse,
+    summary="🔐 Iniciar Sesión",
+    description="Autentica al usuario y retorna un token JWT."
+)
 async def login(login_data: UserLoginRequest):
     """
-    🔐 Iniciar sesión
+    Inicia sesión con email y contraseña.
     
-    Autentica al usuario con email y contraseña.
-    Retorna el usuario y un token JWT válido por 7 días.
+    **Request body:**
+    ```json
+    {
+        "email": "usuario@email.com",
+        "password": "Password123"
+    }
+    ```
+    
+    **Response (200 OK):**
+    ```json
+    {
+        "user": {
+            "id": "507f1f77bcf86cd799439011",
+            "username": "usuario123",
+            "email": "usuario@email.com",
+            "predictions_count": 5,
+            "is_active": true
+        },
+        "token": {
+            "access_token": "eyJhbGciOiJIUzI1NiIs...",
+            "token_type": "bearer",
+            "expires_in": 1800
+        },
+        "message": "Login exitoso"
+    }
+    ```
+    
+    **Errores:**
+    - 401: Credenciales incorrectas
+    - 404: Usuario no encontrado
+    
+    **Duración del token:** 30 minutos
     """
     # Autenticar usuario
     user = await AuthService.authenticate_user(login_data.email, login_data.password)

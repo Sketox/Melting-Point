@@ -17,12 +17,12 @@ from .auth_schemas import UserInDB, UserResponse, SessionInDB
 
 logger = logging.getLogger(__name__)
 
-# Configuración de seguridad
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "tu_clave_secreta_super_segura_cambiala_en_produccion")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 días
+# Configuración de seguridad desde variables de entorno
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev_secret_key_change_in_production")
+ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
-# Context para hash de contraseñas
+# Context para hash de contraseñas con bcrypt (12 rounds por defecto)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Security scheme para FastAPI
@@ -34,13 +34,25 @@ class AuthService:
     
     @staticmethod
     def hash_password(password: str) -> str:
-        """Hashea una contraseña usando bcrypt"""
-        return pwd_context.hash(password)
+        """
+        Hashea una contraseña usando bcrypt
+        Bcrypt tiene límite de 72 bytes, se trunca automáticamente
+        """
+        # Truncar a 72 bytes para evitar error de bcrypt
+        password_bytes = password.encode('utf-8')[:72]
+        password_truncated = password_bytes.decode('utf-8', errors='ignore')
+        return pwd_context.hash(password_truncated)
     
     @staticmethod
     def verify_password(plain_password: str, hashed_password: str) -> bool:
-        """Verifica una contraseña contra su hash"""
-        return pwd_context.verify(plain_password, hashed_password)
+        """
+        Verifica una contraseña contra su hash
+        Trunca a 72 bytes para consistencia con bcrypt
+        """
+        # Truncar a 72 bytes igual que en hash_password
+        password_bytes = plain_password.encode('utf-8')[:72]
+        password_truncated = password_bytes.decode('utf-8', errors='ignore')
+        return pwd_context.verify(password_truncated, hashed_password)
     
     @staticmethod
     def create_access_token(data: Dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -143,43 +155,59 @@ class AuthService:
         Raises:
             HTTPException: Si el usuario o email ya existe
         """
-        db = get_async_database()
-        
-        # Verificar si el email ya existe
-        existing_email = await AuthService.get_user_by_email(email)
-        if existing_email:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="El email ya está registrado"
+        try:
+            db = get_async_database()
+            
+            # Verificar si el email ya existe
+            existing_email = await AuthService.get_user_by_email(email)
+            if existing_email:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="El email ya está registrado"
+                )
+            
+            # Verificar si el username ya existe
+            existing_username = await AuthService.get_user_by_username(username)
+            if existing_username:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="El nombre de usuario ya está en uso"
+                )
+            
+            # Crear usuario
+            user = UserInDB(
+                username=username.lower(),
+                email=email.lower(),
+                hashed_password=AuthService.hash_password(password),
+                full_name=full_name,
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+                is_active=True,
+                predictions_count=0
             )
-        
-        # Verificar si el username ya existe
-        existing_username = await AuthService.get_user_by_username(username)
-        if existing_username:
+            
+            # Convertir a dict para MongoDB
+            user_dict = user.model_dump(by_alias=True, exclude={"id"})
+            
+            # Insertar en MongoDB
+            result = await db[Collections.USERS].insert_one(user_dict)
+            
+            # Asignar el ID generado
+            user.id = result.inserted_id
+            logger.info(f"✓ Usuario creado: {username} ({email})")
+            
+            return user
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error al crear usuario en MongoDB: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="El nombre de usuario ya está en uso"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error al crear usuario: {str(e)}"
             )
-        
-        # Crear usuario
-        user = UserInDB(
-            username=username.lower(),
-            email=email.lower(),
-            hashed_password=AuthService.hash_password(password),
-            full_name=full_name,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
-            is_active=True,
-            predictions_count=0
-        )
-        
-        user_dict = user.model_dump(by_alias=True, exclude={"id"})
-        result = await db[Collections.USERS].insert_one(user_dict)
-        
-        user.id = result.inserted_id
-        logger.info(f"✓ Usuario creado: {username} ({email})")
-        
-        return user
     
     @staticmethod
     async def authenticate_user(email: str, password: str) -> Optional[UserInDB]:

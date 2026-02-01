@@ -18,7 +18,10 @@ from ..schemas import (
 logger = logging.getLogger(__name__)
 
 # Router para endpoints de Supabase
-router = APIRouter(prefix="/api/v2", tags=["Supabase API"])
+router = APIRouter(
+    prefix="/api/v2",
+    tags=["🗄️ Supabase"]
+)
 
 
 @router.get("/predictions", response_model=List[PredictResponse])
