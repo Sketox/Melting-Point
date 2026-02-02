@@ -89,6 +89,7 @@ class Collections:
     USER_PREDICTIONS = "user_predictions"
     SESSIONS = "sessions"
     COMPOUNDS = "compounds"  # Opcional: si quieres migrar datos aquí también
+    ACTIVITY_LOGS = "activity_logs"  # Registro de actividad de usuarios
 
 
 # Índices para optimizar consultas
@@ -108,5 +109,11 @@ async def create_indexes():
     # Índice en sesiones
     await db[Collections.SESSIONS].create_index("token", unique=True)
     await db[Collections.SESSIONS].create_index("expires_at")
+    
+    # Índices en activity logs
+    await db[Collections.ACTIVITY_LOGS].create_index("user_id")
+    await db[Collections.ACTIVITY_LOGS].create_index("created_at")
+    await db[Collections.ACTIVITY_LOGS].create_index("action")
+    await db[Collections.ACTIVITY_LOGS].create_index([("user_id", 1), ("created_at", -1)])
     
     logger.info("✓ Índices de MongoDB creados")

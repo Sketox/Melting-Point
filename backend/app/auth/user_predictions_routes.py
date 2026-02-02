@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
-    prefix="/user-predictions",
+    prefix="/auth/user-predictions",
     tags=["💾 User Predictions"]
 )
 

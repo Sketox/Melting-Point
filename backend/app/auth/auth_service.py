@@ -13,7 +13,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import logging
 
 from .mongodb_client import get_async_database, Collections
-from .auth_schemas import UserInDB, UserResponse, SessionInDB
+from .auth_schemas import UserInDB, UserResponse, SessionInDB, UserActivityLog
 
 logger = logging.getLogger(__name__)
 
@@ -255,6 +255,50 @@ class AuthService:
         
         session.id = result.inserted_id
         return session
+    
+    @staticmethod
+    async def log_activity(
+        user_id: str,
+        username: str,
+        action: str,
+        resource: str,
+        details: Optional[Dict] = None,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None
+    ):
+        """
+        Registra actividad del usuario en la base de datos
+        
+        Args:
+            user_id: ID del usuario
+            username: Username del usuario
+            action: Acción realizada (create, update, delete, login, etc)
+            resource: Recurso afectado (profile, password, prediction, etc)
+            details: Detalles adicionales opcionales
+            ip_address: IP del cliente
+            user_agent: User agent del navegador
+        """
+        try:
+            db = get_async_database()
+            
+            activity_log = UserActivityLog(
+                user_id=user_id,
+                username=username,
+                action=action,
+                resource=resource,
+                details=details,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                created_at=datetime.utcnow()
+            )
+            
+            log_dict = activity_log.model_dump(by_alias=True)
+            await db[Collections.ACTIVITY_LOGS].insert_one(log_dict)
+            
+            logger.info(f"📝 Activity logged: {username} - {action} {resource}")
+        except Exception as e:
+            # No queremos que falle la operación principal si falla el log
+            logger.error(f"Error logging activity: {e}")
     
     @staticmethod
     async def invalidate_session(token: str):

@@ -3,7 +3,7 @@ Schemas para autenticación y usuarios
 """
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
-from typing import Optional, List
+from typing import Optional, Dict, Any
 from datetime import datetime
 from bson import ObjectId
 
@@ -88,10 +88,26 @@ class ChangePasswordRequest(BaseModel):
         return v
 
 
+class DeleteAccountRequest(BaseModel):
+    """Schema para eliminar/desactivar cuenta"""
+    password: str = Field(..., description="Contraseña para confirmar")
+
+
 class UpdateProfileRequest(BaseModel):
     """Schema para actualizar perfil"""
+    username: Optional[str] = Field(None, min_length=3, max_length=50)
+    email: Optional[EmailStr] = None
     full_name: Optional[str] = Field(None, max_length=100)
     bio: Optional[str] = Field(None, max_length=500)
+    
+    @field_validator('username')
+    @classmethod
+    def username_alphanumeric(cls, v):
+        if v is None:
+            return v
+        if not v.replace('_', '').replace('-', '').isalnum():
+            raise ValueError('Username debe ser alfanumérico (se permiten _ y -)')
+        return v.lower()
 
 
 # ============================================
@@ -192,4 +208,21 @@ class SessionInDB(BaseModel):
     model_config = {
         "populate_by_name": True,
         "json_encoders": {ObjectId: str}
+    }
+
+
+class UserActivityLog(BaseModel):
+    """Schema para logs de actividad de usuario"""
+    user_id: str = Field(..., description="ID del usuario")
+    username: str = Field(..., description="Username del usuario")
+    action: str = Field(..., description="Acción realizada")
+    resource: str = Field(..., description="Recurso afectado (profile, password, prediction, etc)")
+    details: Optional[Dict[str, Any]] = Field(None, description="Detalles adicionales de la acción")
+    ip_address: Optional[str] = Field(None, description="IP del usuario")
+    user_agent: Optional[str] = Field(None, description="User agent del navegador")
+    created_at: datetime = Field(default_factory=datetime.utcnow, description="Fecha de la acción")
+    
+    model_config = {
+        "populate_by_name": True,
+        "json_encoders": {ObjectId: str, datetime: lambda v: v.isoformat()}
     }
