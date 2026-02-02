@@ -2,7 +2,7 @@
 Endpoints de autenticación
 Registro, login, logout, perfil
 """
-
+from fastapi import Query
 from fastapi import APIRouter, HTTPException, status, Depends
 from datetime import timedelta
 import logging
@@ -15,6 +15,7 @@ from .auth_schemas import (
     UserResponse,
     Token,
     ChangePasswordRequest,
+    DeleteAccountRequest,
     UpdateProfileRequest
 )
 from .auth_service import (
@@ -121,6 +122,15 @@ async def register(user_data: UserRegisterRequest):
         
         logger.info(f"✓ Usuario registrado: {user.username}")
         
+        # Registrar actividad
+        await AuthService.log_activity(
+            user_id=str(user.id),
+            username=user.username,
+            action="create",
+            resource="account",
+            details={"email": user.email, "full_name": user.full_name}
+        )
+        
         return RegisterResponse(
             user=user_response,
             token=token,
@@ -193,6 +203,13 @@ async def login(login_data: UserLoginRequest):
             headers={"WWW-Authenticate": "Bearer"},
         )
     
+    # Verificar que la cuenta esté activa
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Esta cuenta ha sido desactivada. Contacta al soporte si deseas reactivarla.",
+        )
+    
     # Crear token JWT
     access_token = AuthService.create_access_token(
         data={"sub": str(user.id), "email": user.email}
@@ -221,6 +238,15 @@ async def login(login_data: UserLoginRequest):
     )
     
     logger.info(f"✓ Login exitoso: {user.username}")
+    
+    # Registrar actividad
+    await AuthService.log_activity(
+        user_id=str(user.id),
+        username=user.username,
+        action="login",
+        resource="session",
+        details={"email": user.email}
+    )
     
     return LoginResponse(
         user=user_response,
@@ -252,6 +278,14 @@ async def logout(current_user: UserResponse = Depends(get_current_user)):
     # En producción, deberías invalidar el token en la BD
     
     logger.info(f"✓ Logout: {current_user.username}")
+    
+    # Registrar actividad
+    await AuthService.log_activity(
+        user_id=current_user.id,
+        username=current_user.username,
+        action="logout",
+        resource="session"
+    )
     
     return {
         "message": "Sesión cerrada exitosamente",
@@ -298,6 +332,14 @@ async def change_password(
     
     logger.info(f"✓ Contraseña cambiada: {current_user.username}")
     
+    # Registrar actividad
+    await AuthService.log_activity(
+        user_id=current_user.id,
+        username=current_user.username,
+        action="update",
+        resource="password"
+    )
+    
     return {"message": "Contraseña actualizada exitosamente"}
 
 
@@ -309,14 +351,36 @@ async def update_profile(
     """
     ✏️ Actualizar perfil
     
-    Permite actualizar nombre completo y biografía.
+    Permite actualizar username, email, nombre completo y biografía.
     """
     db = get_async_database()
     from bson import ObjectId
     from datetime import datetime
     
+    # Verificar si el nuevo username ya existe (si se está cambiando)
+    if profile_data.username and profile_data.username != current_user.username:
+        existing_user = await AuthService.get_user_by_username(profile_data.username)
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El nombre de usuario ya está en uso"
+            )
+    
+    # Verificar si el nuevo email ya existe (si se está cambiando)
+    if profile_data.email and profile_data.email != current_user.email:
+        existing_user = await AuthService.get_user_by_email(profile_data.email)
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El email ya está registrado"
+            )
+    
     # Preparar datos de actualización
     update_data = {}
+    if profile_data.username is not None:
+        update_data["username"] = profile_data.username.lower()
+    if profile_data.email is not None:
+        update_data["email"] = profile_data.email.lower()
     if profile_data.full_name is not None:
         update_data["full_name"] = profile_data.full_name
     if profile_data.bio is not None:
@@ -333,7 +397,16 @@ async def update_profile(
     # Obtener usuario actualizado
     user = await AuthService.get_user_by_id(current_user.id)
     
-    logger.info(f"✓ Perfil actualizado: {current_user.username}")
+    logger.info(f"✓ Perfil actualizado: {user.username}")
+    
+    # Registrar actividad
+    await AuthService.log_activity(
+        user_id=current_user.id,
+        username=user.username,
+        action="update",
+        resource="profile",
+        details=update_data
+    )
     
     return UserResponse(
         _id=str(user.id),
@@ -348,29 +421,68 @@ async def update_profile(
 
 
 @router.delete("/account")
-async def delete_account(current_user: UserResponse = Depends(get_current_user)):
+async def delete_account(
+    password_data: DeleteAccountRequest,
+    current_user: UserResponse = Depends(get_current_user)
+):
     """
-    🗑️ Eliminar cuenta
+    🗑️ Desactivar cuenta
     
-    Elimina la cuenta del usuario y todas sus predicciones.
-    Esta acción es irreversible.
+    Desactiva la cuenta del usuario (soft delete).
+    El usuario no podrá acceder pero sus datos se mantienen en la base de datos.
     """
     db = get_async_database()
     from bson import ObjectId
+    from datetime import datetime
     
-    # Eliminar predicciones del usuario
-    await db[Collections.USER_PREDICTIONS].delete_many({"user_id": current_user.id})
+    # Verificar contraseña
+    user = await AuthService.get_user_by_id(current_user.id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuario no encontrado"
+        )
     
-    # Eliminar sesiones del usuario
-    await db[Collections.SESSIONS].delete_many({"user_id": current_user.id})
+    if not AuthService.verify_password(password_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Contraseña incorrecta"
+        )
     
-    # Eliminar usuario
-    await db[Collections.USERS].delete_one({"_id": ObjectId(current_user.id)})
+    # Desactivar cuenta (soft delete)
+    await db[Collections.USERS].update_one(
+        {"_id": ObjectId(current_user.id)},
+        {
+            "$set": {
+                "is_active": False,
+                "deactivated_at": datetime.utcnow()
+            }
+        }
+    )
     
-    logger.info(f"✓ Cuenta eliminada: {current_user.username}")
+    # Marcar sesiones como inactivas (soft delete en sesiones también)
+    await db[Collections.SESSIONS].update_many(
+        {"user_id": current_user.id},
+        {
+            "$set": {
+                "is_active": False,
+                "deactivated_at": datetime.utcnow()
+            }
+        }
+    )
+    
+    logger.info(f"✓ Cuenta desactivada: {current_user.username}")
+    
+    # Registrar actividad
+    await AuthService.log_activity(
+        user_id=current_user.id,
+        username=current_user.username,
+        action="deactivate",
+        resource="account"
+    )
     
     return {
-        "message": "Cuenta eliminada exitosamente",
+        "message": "Cuenta desactivada exitosamente",
         "username": current_user.username
     }
 
@@ -407,4 +519,40 @@ async def get_user_stats(current_user: UserResponse = Depends(get_current_user))
         "favorites_count": favorites_count,
         "latest_prediction": latest_prediction,
         "member_since": current_user.created_at.isoformat()
+    }
+
+
+@router.get("/activity-logs")
+async def get_activity_logs(
+    current_user: UserResponse = Depends(get_current_user),
+    limit: int = Query(50, le=100, description="Número máximo de logs a retornar"),
+    skip: int = Query(0, ge=0, description="Número de logs a saltar")
+):
+    """
+    📝 Logs de actividad del usuario
+    
+    Retorna el historial de acciones del usuario.
+    """
+    db = get_async_database()
+    
+    # Obtener logs del usuario
+    cursor = db[Collections.ACTIVITY_LOGS].find(
+        {"user_id": current_user.id}
+    ).sort("created_at", -1).skip(skip).limit(limit)
+    
+    logs = await cursor.to_list(length=limit)
+    
+    # Contar total
+    total = await db[Collections.ACTIVITY_LOGS].count_documents({"user_id": current_user.id})
+    
+    # Convertir ObjectId a string
+    for log in logs:
+        if "_id" in log:
+            log["_id"] = str(log["_id"])
+    
+    return {
+        "total": total,
+        "limit": limit,
+        "skip": skip,
+        "logs": logs
     }
