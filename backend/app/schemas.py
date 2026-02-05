@@ -74,6 +74,13 @@ class ValidateSmilesResponse(BaseModel):
     warning: Optional[str] = Field(None, description="Advertencia opcional")
 
 
+class CompoundNameResponse(BaseModel):
+    """Respuesta con el nombre del compuesto desde PubChem."""
+    smiles: str = Field(..., description="SMILES consultado")
+    name: str = Field(..., description="Nombre del compuesto")
+    source: str = Field(..., description="Fuente del nombre (pubchem/cache/unknown)")
+
+
 # ============================================
 # RESPONSE MODELS - Predictions
 # ============================================
@@ -83,6 +90,14 @@ class PredictResponse(BaseModel):
     id: int
     Tm_pred: float = Field(..., description="Punto de fusión predicho en Kelvin")
     smiles: Optional[str] = Field(None, description="Estructura SMILES (si disponible)")
+
+
+class DataItemResponse(BaseModel):
+    """Respuesta de un item de datos (train/test/user)."""
+    id: Any = Field(..., description="ID del compuesto (int para dataset, str para user)")
+    smiles: str = Field(..., description="Estructura SMILES")
+    Tm_pred: float = Field(..., description="Punto de fusión (K) - real para train, predicho para test/user")
+    source: str = Field(..., description="Fuente: train (real), test (predicción), user")
 
 
 class StatsResponse(BaseModel):

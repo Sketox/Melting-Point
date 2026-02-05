@@ -2,23 +2,17 @@
 
 Este directorio contiene el código principal de la API FastAPI para predicción de puntos de fusión.
 
-## 📁 Estructura Organizada
+## 📁 Estructura
 
 ```
 app/
-├── auth/                    # Módulo de Autenticación y MongoDB
-│   ├── __init__.py         # Exports del módulo
+├── auth/                    # Módulo de Autenticación (opcional, MongoDB)
+│   ├── __init__.py
 │   ├── mongodb_client.py   # Cliente async de MongoDB
 │   ├── auth_schemas.py     # Schemas Pydantic (User, Token, etc.)
 │   ├── auth_service.py     # Lógica de autenticación (JWT, passwords)
-│   ├── auth_routes.py      # Endpoints: /auth/register, /auth/login, etc.
-│   └── user_predictions_routes.py  # Endpoints: /user-predictions/*
-│
-├── supabase/               # Módulo de Supabase (opcional)
-│   ├── __init__.py         # Exports del módulo
-│   ├── supabase_client.py  # Cliente de Supabase
-│   ├── supabase_service.py # Servicios de datos con Supabase
-│   └── supabase_routes.py  # Endpoints: /api/v2/*
+│   ├── auth_routes.py      # Endpoints: /auth/*
+│   └── user_predictions_routes.py
 │
 ├── main.py                 # Aplicación FastAPI principal
 ├── ml_service.py           # Servicio de ML (predicciones, validación)
@@ -27,174 +21,136 @@ app/
 └── README.md               # Este archivo
 ```
 
-## 🔐 Módulo Auth (`app.auth`)
-
-**Propósito:** Sistema completo de autenticación con MongoDB y JWT.
-
-### Archivos:
-
-- **`mongodb_client.py`**: Conexión async a MongoDB, colecciones, índices
-- **`auth_schemas.py`**: Modelos Pydantic para usuarios, tokens, predicciones
-- **`auth_service.py`**: Lógica de negocio (hash passwords, JWT, validación)
-- **`auth_routes.py`**: 8 endpoints de autenticación
-- **`user_predictions_routes.py`**: CRUD de predicciones por usuario
-
-### Uso:
-
-```python
-from app.auth import (
-    auth_router,
-    user_predictions_router,
-    get_async_database,
-    AuthService
-)
-```
-
-### Endpoints:
-
-```
-POST   /auth/register           - Registrar nuevo usuario
-POST   /auth/login              - Login con email/password
-GET    /auth/me                 - Obtener usuario actual (requiere token)
-POST   /auth/logout             - Cerrar sesión
-PUT    /auth/change-password    - Cambiar password
-PUT    /auth/profile            - Actualizar perfil
-DELETE /auth/account            - Eliminar cuenta
-GET    /auth/stats              - Estadísticas del usuario
-
-POST   /user-predictions/       - Guardar predicción
-GET    /user-predictions/       - Listar mis predicciones
-GET    /user-predictions/{id}   - Obtener una predicción
-PUT    /user-predictions/{id}   - Actualizar predicción
-DELETE /user-predictions/{id}   - Eliminar predicción
-GET    /user-predictions/search/by-smiles - Buscar por SMILES
-```
-
-## ☁️ Módulo Supabase (`app.supabase`)
-
-**Propósito:** Integración con Supabase PostgreSQL (opcional, en mantenimiento).
-
-### Archivos:
-
-- **`supabase_client.py`**: Cliente Supabase (singleton, lazy init)
-- **`supabase_service.py`**: Lógica de consultas a Supabase
-- **`supabase_routes.py`**: Endpoints v2 del API
-
-### Uso:
-
-```python
-from app.supabase import supabase_router
-```
-
-### Estado:
-
-⚠️ **Opcional** - Si no configuras `SUPABASE_URL` y `SUPABASE_SERVICE_KEY` en `.env`, el módulo no se carga pero el backend funciona normalmente.
-
-### Endpoints:
-
-```
-GET /api/v2/predictions          - Todas las predicciones (desde Supabase)
-GET /api/v2/predictions/{id}     - Predicción por ID
-GET /api/v2/stats                - Estadísticas
-GET /api/v2/distribution         - Distribución de temperaturas
-GET /api/v2/compounds            - Listar compuestos
-POST /api/v2/compounds           - Crear compuesto
-DELETE /api/v2/compounds/{id}    - Eliminar compuesto
-```
-
-## 🧪 Archivos Principales
+## 🧪 Módulo Principal
 
 ### `main.py`
 
 Aplicación FastAPI principal que:
 - Configura CORS
-- Incluye routers de auth y supabase
-- Define endpoints de ML (/predict-by-id, /stats, /validate-smiles, etc.)
-- Conecta a MongoDB al startup
+- Define endpoints de ML y datos
+- Conecta a MongoDB al startup (opcional)
+- Incluye integración con PubChem para nombres de compuestos
 
 ### `ml_service.py`
 
 Servicio de Machine Learning:
-- Carga modelo ChemProp
+- Carga datasets procesados (train + test)
 - Valida SMILES con RDKit
-- Genera predicciones
-- Gestiona compuestos de usuario (CSV)
+- Genera predicciones (ChemProp + Ensemble)
+- Gestiona compuestos de usuario
 
 ### `schemas.py`
 
-Schemas Pydantic generales:
+Schemas Pydantic:
 - `PredictResponse`, `StatsResponse`
 - `CompoundResponse`, `ValidateSmilesResponse`
-- Requests y responses de endpoints ML
+- `DataItemResponse` (train/test/user)
+- `CompoundNameResponse` (PubChem)
+
+## 📊 Sistema de Datos
+
+El backend maneja tres fuentes de datos:
+
+| Fuente | Archivo | Descripción |
+|--------|---------|-------------|
+| **Train** | `dataset_train.csv` | 2,662 compuestos con Tm REAL medido |
+| **Test** | `dataset_test.csv` | 666 compuestos con Tm PREDICHO |
+| **User** | `user_compounds.csv` | Compuestos agregados por el usuario |
+
+## 🎯 Endpoints Principales
+
+### Datos y Predicciones
+```
+GET  /health              - Estado del sistema
+GET  /model-info          - Info del modelo (MAE, configuración)
+GET  /data-all            - Todos los datos (train+test+user)
+GET  /predict-all         - Todas las predicciones test
+GET  /stats               - Estadísticas del dataset
+```
+
+### Validación y Nombres
+```
+POST /validate-smiles     - Validar estructura SMILES
+GET  /compound-name       - Nombre desde PubChem (con cache)
+```
+
+### Compuestos de Usuario
+```
+POST   /compounds         - Crear compuesto + predicción
+GET    /compounds         - Listar compuestos usuario
+DELETE /compounds/{id}    - Eliminar compuesto
+```
+
+### Analytics
+```
+GET /predictions/range              - Filtrar por rango de Tm
+GET /predictions/distribution       - Distribución por categorías
+GET /predictions/by-functional-group - Análisis por grupos funcionales
+GET /predictions/by-molecule-size   - Análisis por tamaño molecular
+```
+
+## 🔬 Endpoint de Grupos Funcionales
+
+**¿Por qué es útil?**
+
+El endpoint `/predictions/by-functional-group` analiza qué grupos funcionales están presentes en las moléculas y cómo afectan el punto de fusión.
+
+**Justificación científica:**
+- Los grupos funcionales determinan las **interacciones intermoleculares**
+- Grupos polares (OH, NH2) aumentan Tm por **puentes de hidrógeno**
+- Grupos aromáticos aumentan Tm por **π-stacking**
+- Útil para comparar tu compuesto con moléculas de estructura similar
+
+**Ejemplo de uso para decisiones:**
+1. Tu compuesto tiene grupo hidroxilo (OH)
+2. Consultas el promedio de Tm para compuestos con OH
+3. Comparas si tu predicción está dentro del rango esperado
+4. Mayor confianza si tu Tm cae en el rango típico del grupo
+
+## 🚀 Iniciar el Servidor
+
+```bash
+cd backend
+.venv\Scripts\activate      # Windows
+source .venv/bin/activate   # Linux/Mac
+
+# IMPORTANTE: Aplicar parche para PyTorch 2.6+
+python patch_chemprop_torch.py
+
+uvicorn app.main:app --reload --port 8000
+```
+
+Docs interactivos: http://localhost:8000/docs
+
+## 📦 Dependencias Principales
+
+```bash
+pip install -r requirements.txt
+```
+
+- **FastAPI** - Framework web
+- **Pydantic** - Validación de datos
+- **RDKit** - Química computacional
+- **ChemProp** - Modelo D-MPNN
+- **XGBoost, LightGBM** - Ensemble
+- **pandas, numpy, scikit-learn** - ML y datos
+- **httpx** - Cliente HTTP async (PubChem)
 
 ## 🔧 Configuración
 
 ### Variables de Entorno (`.env`)
 
 ```bash
-# MongoDB (Requerido para auth)
+# MongoDB (Opcional - para auth)
 MONGODB_URL=mongodb://localhost:27017
 MONGODB_DB_NAME=melting_point_db
 
-# JWT (Requerido para auth)
-JWT_SECRET_KEY=your-secret-key-here-change-in-production
-JWT_ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=30
-
-# Supabase (Opcional)
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_SERVICE_KEY=your-service-role-key
-```
-
-## 🚀 Iniciar el Servidor
-
-```bash
-cd backend
-uvicorn app.main:app --reload --port 8000
-```
-
-Docs interactivos: http://localhost:8000/docs
-
-## 📦 Dependencias
-
-```bash
-pip install -r requirements.txt
-```
-
-Principales:
-- **FastAPI** - Framework web
-- **Pydantic** - Validación de datos
-- **PyMongo/Motor** - MongoDB async
-- **python-jose** - JWT
-- **passlib** - Hash de passwords
-- **Supabase** - Cliente Supabase (opcional)
-- **RDKit** - Química computacional
-- **ChemProp** - Modelo de ML
-- **pandas, numpy, scikit-learn** - ML y datos
-
-## 🔒 Seguridad
-
-- Passwords hasheados con bcrypt
-- JWT con expiración configurable
-- Validación de datos con Pydantic
-- Índices únicos en MongoDB (email, username)
-- CORS configurado
-
-## 🧪 Testing
-
-Verificar dependencias:
-```bash
-python test_dependencies.py
-```
-
-Verificar imports:
-```bash
-python -c "from app.main import app; print('OK')"
+# JWT (Opcional - para auth)
+JWT_SECRET_KEY=your-secret-key
 ```
 
 ## 📝 Notas
 
-- **MongoDB**: Puede ser local o MongoDB Atlas (cloud)
-- **Supabase**: Completamente opcional, el backend funciona sin él
-- **Organización**: Módulos separados para mejor mantenibilidad
-- **Async**: MongoDB usa Motor para operaciones asíncronas
+- **MongoDB**: Completamente opcional, el backend funciona sin él
+- **PubChem**: Cache en memoria para evitar llamadas repetidas
+- **Incertidumbre**: MAE del modelo combinado es ±22.80 K (Kaggle)

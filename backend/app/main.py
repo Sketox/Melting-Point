@@ -7,7 +7,8 @@ ACTUALIZADO:
 - Manejo mejorado de errores para SMILES inválidos
 """
 
-from typing import List, Optional
+from typing import List, Optional, Dict
+import httpx
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,6 +21,7 @@ from .schemas import (
     ValidateSmilesRequest,
     # Response
     PredictResponse,
+    DataItemResponse,
     StatsResponse,
     RangeResponse,
     CompoundResponse,
@@ -32,10 +34,8 @@ from .schemas import (
     HealthResponse,
     ValidateSmilesResponse,
     ModelInfoResponse,
+    CompoundNameResponse,
 )
-
-# Importar rutas de Supabase
-from .supabase import supabase_router
 
 # Importar rutas de autenticación y MongoDB
 from .auth import (
@@ -77,10 +77,6 @@ tags_metadata = [
         "name": "🧪 Compounds",
         "description": "Gestión de compuestos del dataset",
     },
-    {
-        "name": "🗄️ Supabase",
-        "description": "Endpoints opcionales de Supabase (requiere configuración)",
-    },
 ]
 
 app = FastAPI(
@@ -108,9 +104,8 @@ app = FastAPI(
     - Análisis de grupos funcionales
     - Distribución por categorías
     
-    ### 🗄️ Bases de Datos
+    ### 🗄️ Base de Datos
     - **MongoDB Atlas**: Autenticación y datos de usuario
-    - **Supabase** (opcional): Datos adicionales
     
     ## 🚀 Inicio Rápido
     
@@ -158,8 +153,8 @@ app.add_middleware(
 
 ml_service: MLService | None = None
 
-# Incluir rutas de Supabase
-app.include_router(supabase_router)
+# Cache para nombres de compuestos (PubChem)
+compound_name_cache: Dict[str, str] = {}
 
 # Incluir rutas de autenticación y predicciones de usuario
 app.include_router(auth_router)
@@ -168,21 +163,20 @@ app.include_router(user_predictions_router)
 
 @app.on_event("startup")
 async def startup_event() -> None:
-    """Carga el modelo, CSV y conecta a MongoDB al iniciar la aplicación."""
+    """Carga el modelo, CSV y conecta a MongoDB al iniciar la aplicacion."""
     global ml_service
     ml_service = MLService()
-    
-    # Conectar a MongoDB y crear índices
+
+    # Conectar a MongoDB y crear indices (opcional)
     try:
-        db = get_async_database()
-        await create_indexes()
         connection_ok = await test_mongodb_connection()
         if connection_ok:
-            print("✓ MongoDB conectado y listo")
+            await create_indexes()
+            print("[OK] MongoDB conectado y listo")
         else:
-            print("⚠️ MongoDB no disponible - funcionalidades de usuario deshabilitadas")
+            print("[WARN] MongoDB no disponible - funcionalidades de usuario deshabilitadas")
     except Exception as e:
-        print(f"⚠️ Error al conectar MongoDB: {e}")
+        print(f"[WARN] MongoDB opcional no configurado: {type(e).__name__}")
 
 
 @app.on_event("shutdown")
@@ -433,8 +427,56 @@ def predict_all():
     results = ml_service.predict_all()
 
     return [
-        PredictResponse(id=sample_id, Tm_pred=round(pred, 2)) 
+        PredictResponse(id=sample_id, Tm_pred=round(pred, 2))
         for sample_id, pred in results
+    ]
+
+
+@app.get(
+    "/data-all",
+    response_model=List[DataItemResponse],
+    tags=["🔬 Predictions"],
+    summary="📊 Todos los Datos (Train + Test + Usuario)",
+    description="Obtiene todos los datos: train (Tm real), test (Tm predicho) y compuestos de usuario."
+)
+def get_all_data():
+    """
+    Retorna todos los datos del sistema para visualización y toma de decisiones.
+
+    **Categorías:**
+    - **train** (verde): 2,662 compuestos con Tm REAL conocido
+    - **test** (azul): 666 compuestos con Tm PREDICHO (MAE ~22.80 K)
+    - **user** (naranja): Compuestos agregados por el usuario
+
+    **Returns:**
+    Lista de objetos con:
+    - `id`: ID del compuesto
+    - `smiles`: Estructura SMILES
+    - `Tm_pred`: Temperatura de fusión (K)
+    - `source`: Fuente (train/test/user)
+
+    **Ejemplo de respuesta:**
+    ```json
+    [
+        {"id": 2175, "smiles": "FC1=C(F)C(F)(F)C1(F)F", "Tm_pred": 213.15, "source": "train"},
+        {"id": 1022, "smiles": "CCOC(=O)c1ccc(O)cc1", "Tm_pred": 358.66, "source": "test"},
+        {"id": "USR_001", "smiles": "CCO", "Tm_pred": 159.05, "source": "user"}
+    ]
+    ```
+    """
+    if ml_service is None:
+        raise HTTPException(status_code=500, detail="MLService no está inicializado.")
+
+    all_data = ml_service.get_all_data()
+
+    return [
+        DataItemResponse(
+            id=item["id"],
+            smiles=item["smiles"],
+            Tm_pred=round(item["Tm_pred"], 2),
+            source=item["source"]
+        )
+        for item in all_data
     ]
 
 
@@ -905,8 +947,93 @@ def get_by_molecule_size():
         raise HTTPException(status_code=500, detail="MLService no está inicializado.")
 
     result = ml_service.get_predictions_by_molecule_size()
-    
+
     return MoleculeSizeResponse(
         total_molecules=result["total_molecules"],
         size_groups=result["size_groups"]
+    )
+
+
+# ============================================
+# 8. PUBCHEM - Nombres de Compuestos
+# ============================================
+@app.get(
+    "/compound-name",
+    response_model=CompoundNameResponse,
+    tags=["✅ Validation"],
+    summary="🏷️ Obtener Nombre del Compuesto",
+    description="Obtiene el nombre IUPAC o común de un compuesto desde PubChem."
+)
+async def get_compound_name(smiles: str = Query(..., description="SMILES del compuesto")):
+    """
+    Obtiene el nombre del compuesto desde PubChem.
+
+    **Proceso:**
+    1. Verifica si el nombre está en cache
+    2. Si no, consulta PubChem REST API
+    3. Guarda en cache para futuras consultas
+
+    **Ejemplo de uso:**
+    ```
+    GET /compound-name?smiles=CCO
+    ```
+
+    **Respuesta:**
+    ```json
+    {
+        "smiles": "CCO",
+        "name": "ethanol",
+        "source": "pubchem"
+    }
+    ```
+    """
+    global compound_name_cache
+
+    # Verificar cache
+    if smiles in compound_name_cache:
+        return CompoundNameResponse(
+            smiles=smiles,
+            name=compound_name_cache[smiles],
+            source="cache"
+        )
+
+    # Consultar PubChem
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            # Primero obtener el CID desde SMILES
+            url_cid = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/smiles/{smiles}/cids/JSON"
+            response = await client.get(url_cid)
+
+            if response.status_code == 200:
+                data = response.json()
+                cid = data.get("IdentifierList", {}).get("CID", [None])[0]
+
+                if cid:
+                    # Obtener el nombre desde el CID
+                    url_name = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cid}/synonyms/JSON"
+                    name_response = await client.get(url_name)
+
+                    if name_response.status_code == 200:
+                        name_data = name_response.json()
+                        synonyms = name_data.get("InformationList", {}).get("Information", [{}])[0].get("Synonym", [])
+
+                        if synonyms:
+                            # Usar el primer sinónimo (generalmente el más común)
+                            name = synonyms[0]
+                            compound_name_cache[smiles] = name
+                            return CompoundNameResponse(
+                                smiles=smiles,
+                                name=name,
+                                source="pubchem"
+                            )
+
+    except Exception as e:
+        print(f"Error consultando PubChem: {e}")
+
+    # Si falla, retornar "Unknown"
+    compound_name_cache[smiles] = "Unknown"
+    return CompoundNameResponse(
+        smiles=smiles,
+        name="Unknown",
+        source="unknown"
     )

@@ -22,6 +22,18 @@ CHEMPROP_MODEL_DIR = os.getenv(
 # Rutas de datos
 DATA_DIR = BASE_DIR.parent / "data"
 
+# Datasets procesados (train con Tm real, test con Tm predicho)
+TRAIN_DATASET_PATH = os.getenv(
+    "TRAIN_DATASET_PATH",
+    str(DATA_DIR / "processed" / "dataset_train.csv")
+)
+
+TEST_DATASET_PATH = os.getenv(
+    "TEST_DATASET_PATH",
+    str(DATA_DIR / "processed" / "dataset_test.csv")
+)
+
+# Legacy paths (para compatibilidad)
 TEST_PROCESSED_PATH = os.getenv(
     "TEST_PROCESSED_PATH",
     str(DATA_DIR / "processed" / "test_processed.csv")
@@ -31,6 +43,12 @@ TEST_PROCESSED_PATH = os.getenv(
 SMILES_CSV_PATH = os.getenv(
     "SMILES_CSV_PATH",
     str(DATA_DIR / "processed" / "test_smiles.csv")
+)
+
+# Predicciones pre-calculadas de ChemProp (opcional)
+CHEMPROP_PREDICTIONS_PATH = os.getenv(
+    "CHEMPROP_PREDICTIONS_PATH",
+    str(DATA_DIR / "processed" / "test_chemprop_predictions.csv")
 )
 
 # Compuestos de usuarios

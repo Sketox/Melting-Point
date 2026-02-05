@@ -16,6 +16,7 @@ import os
 
 import pandas as pd
 import numpy as np
+import joblib
 
 # RDKit
 try:
@@ -40,7 +41,11 @@ try:
 except ImportError:
     print("WARNING: ChemProp no está instalado. Se usará solo ensemble.")
 
-from .config import MODEL_PATH, TEST_PROCESSED_PATH, USER_COMPOUNDS_PATH, CHEMPROP_MODEL_DIR, SMILES_CSV_PATH
+from .config import (
+    MODEL_PATH, TEST_PROCESSED_PATH, USER_COMPOUNDS_PATH,
+    CHEMPROP_MODEL_DIR, SMILES_CSV_PATH, CHEMPROP_PREDICTIONS_PATH,
+    TRAIN_DATASET_PATH, TEST_DATASET_PATH
+)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -156,7 +161,40 @@ class MLService:
             if "smiles" not in self.smiles_df.columns:
                 self.smiles_df = None
 
+        # Cargar predicciones pre-calculadas si existen
+        self.predictions_df = None
+        predictions_path = Path(CHEMPROP_PREDICTIONS_PATH) if CHEMPROP_PREDICTIONS_PATH else None
+        if predictions_path and predictions_path.exists():
+            try:
+                self.predictions_df = pd.read_csv(predictions_path)
+                print(f"INFO: Predicciones pre-calculadas cargadas ({len(self.predictions_df)} registros)")
+            except Exception as e:
+                print(f"WARNING: Error cargando predicciones: {e}")
+
         self.feature_cols = [c for c in self.test_df.columns if c != "id"]
+
+        # =====================================================================
+        # CARGAR DATASETS PROCESADOS (train + test)
+        # =====================================================================
+        self.train_dataset: Optional[pd.DataFrame] = None
+        self.test_dataset: Optional[pd.DataFrame] = None
+
+        train_path = Path(TRAIN_DATASET_PATH) if TRAIN_DATASET_PATH else None
+        test_path = Path(TEST_DATASET_PATH) if TEST_DATASET_PATH else None
+
+        if train_path and train_path.exists():
+            try:
+                self.train_dataset = pd.read_csv(train_path)
+                print(f"INFO: Dataset train cargado ({len(self.train_dataset)} registros)")
+            except Exception as e:
+                print(f"WARNING: Error cargando train dataset: {e}")
+
+        if test_path and test_path.exists():
+            try:
+                self.test_dataset = pd.read_csv(test_path)
+                print(f"INFO: Dataset test cargado ({len(self.test_dataset)} registros)")
+            except Exception as e:
+                print(f"WARNING: Error cargando test dataset: {e}")
 
         # Calcular predicciones
         self._predictions_cache: List[Tuple[int, float]] = []
@@ -626,6 +664,47 @@ class MLService:
 
     def predict_all(self) -> List[Tuple[int, float]]:
         return self._predictions_cache
+
+    def get_all_data(self) -> List[Dict[str, Any]]:
+        """
+        Retorna todos los datos: train (real), test (predicción), user.
+
+        Returns:
+            Lista de diccionarios con id, smiles, Tm, source
+        """
+        all_data = []
+
+        # 1. Datos de train (Tm REAL)
+        if self.train_dataset is not None:
+            for _, row in self.train_dataset.iterrows():
+                all_data.append({
+                    "id": int(row["id"]),
+                    "smiles": row.get("smiles", ""),
+                    "Tm_pred": float(row["Tm"]),
+                    "source": "train"
+                })
+
+        # 2. Datos de test (Tm PREDICHO)
+        if self.test_dataset is not None:
+            for _, row in self.test_dataset.iterrows():
+                all_data.append({
+                    "id": int(row["id"]),
+                    "smiles": row.get("smiles", ""),
+                    "Tm_pred": float(row["Tm"]),
+                    "source": "test"
+                })
+
+        # 3. Compuestos de usuario
+        if not self.user_compounds_df.empty:
+            for _, row in self.user_compounds_df.iterrows():
+                all_data.append({
+                    "id": str(row["id"]),
+                    "smiles": row.get("smiles", ""),
+                    "Tm_pred": float(row["Tm_pred"]),
+                    "source": "user"
+                })
+
+        return all_data
 
     def get_stats(self) -> Dict[str, float]:
         preds = [p for _, p in self._predictions_cache]

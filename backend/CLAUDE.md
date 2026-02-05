@@ -98,18 +98,106 @@ Predicción = 20% × ChemProp + 80% × Ensemble
 MAE = 22.80 K (Kaggle)
 ```
 
+## 🎯 Sistema de Toma de Decisiones
+
+El backend soporta un sistema completo de toma de decisiones con tres fuentes de datos:
+
+| Fuente | Color | Cantidad | Descripción |
+|--------|-------|----------|-------------|
+| **Train** | 🟢 Verde | 2,662 | Datos reales con Tm medido experimentalmente |
+| **Test** | 🔵 Azul | 666 | Predicciones del modelo (MAE ~22.80 K) |
+| **User** | 🟠 Naranja | Variable | Compuestos agregados por el usuario |
+
+### Interpretación de Incertidumbre
+
+- **MAE del modelo**: ±22.80 K (intervalo de confianza)
+- **Significado práctico**: Una predicción de 350 K significa que el Tm real está probablemente entre 327-373 K
+- **Para decisiones críticas**: Considerar el rango completo de incertidumbre
+
+### Datasets Procesados
+
+```
+data/processed/
+├── dataset_train.csv    # 2,662 filas (id, smiles, Tm real, source='train')
+└── dataset_test.csv     # 666 filas (id, smiles, Tm predicho, source='test')
+```
+
 ## Endpoints Principales
 
 | Método | Endpoint | Descripción |
 |--------|----------|-------------|
 | GET | `/health` | Health check |
 | GET | `/model-info` | Info del modelo (MAE, configuración) |
+| GET | `/data-all` | **Todos los datos (train+test+user) con fuente** |
+| GET | `/compound-name` | **Nombre del compuesto desde PubChem** |
 | POST | `/validate-smiles` | Validar SMILES |
 | POST | `/compounds` | Crear compuesto + predicción |
 | GET | `/compounds` | Listar compuestos usuario |
 | DELETE | `/compounds/{id}` | Eliminar compuesto |
 | GET | `/stats` | Estadísticas |
-| GET | `/predict-all` | Todas las predicciones |
+| GET | `/predict-all` | Todas las predicciones (test only) |
+| GET | `/predictions/by-functional-group` | **Análisis por grupos funcionales** |
+| GET | `/predictions/by-molecule-size` | Análisis por tamaño molecular |
+| GET | `/predictions/distribution` | Distribución por categorías de Tm |
+
+## 📊 Análisis por Grupos Funcionales
+
+### ¿Por qué es importante?
+
+El endpoint `/predictions/by-functional-group` es clave para la toma de decisiones porque:
+
+1. **Base científica**: Los grupos funcionales determinan las interacciones intermoleculares
+   - **Puentes de hidrógeno**: OH, NH2, COOH aumentan Tm
+   - **π-stacking**: Grupos aromáticos aumentan Tm
+   - **Polaridad**: Afecta la red cristalina
+
+2. **Uso práctico para decisiones**:
+   - Comparar tu compuesto con otros del mismo grupo
+   - Verificar si la predicción es consistente con la estructura
+   - Identificar si tu compuesto está en un rango típico
+
+3. **Cómo defenderlo**:
+   > "El análisis por grupos funcionales permite validar predicciones comparando
+   > con compuestos de estructura similar. Si tu molécula tiene grupo OH,
+   > puedes ver el rango típico de Tm para alcoholes y verificar que
+   > la predicción sea consistente."
+
+### Ejemplo de uso
+
+```python
+# Consultar promedios por grupo funcional
+GET /predictions/by-functional-group
+
+# Respuesta incluye:
+{
+  "groups": [
+    {"name": "Hydroxyl (OH)", "count": 450, "avg_tm": 320.5, ...},
+    {"name": "Amine (NH2)", "count": 280, "avg_tm": 315.2, ...},
+    ...
+  ]
+}
+```
+
+## 📈 Interpretación del MAE
+
+### ¿Por qué usamos MAE de Kaggle (22.80 K) y no el de entrenamiento?
+
+| Métrica | Valor | Descripción |
+|---------|-------|-------------|
+| **MAE Kaggle** | 22.80 K | Error en datos NO vistos (test set real) |
+| MAE ChemProp OOF | 28.85 K | Error en validación cruzada |
+| MAE Ensemble OOF | 26.64 K | Error en validación cruzada |
+
+**El MAE de Kaggle es más válido porque**:
+1. Mide el error en datos completamente nuevos
+2. No hay riesgo de overfitting
+3. Es la métrica oficial de la competencia
+4. Representa el rendimiento real de generalización
+
+**Cómo comunicarlo**:
+> "La incertidumbre de ±22.80 K está validada en el test set de Kaggle,
+> que representa datos que el modelo nunca vio durante el entrenamiento.
+> Esto es una estimación conservadora del error esperado en nuevos compuestos."
 
 ## Ejemplo de Uso
 
@@ -129,7 +217,34 @@ curl -X POST "http://localhost:8000/compounds" \
   "uncertainty": "±23 K",
   "method": "combined (cp=20%)"
 }
+
+# Obtener nombre de compuesto desde PubChem
+curl "http://localhost:8000/compound-name?smiles=CCO"
+# Respuesta: {"smiles": "CCO", "name": "ethanol", "source": "pubchem"}
+
+# Obtener todos los datos (train+test+user)
+curl "http://localhost:8000/data-all"
+# Respuesta: [{"id": 1, "smiles": "...", "Tm_pred": 350.5, "source": "train"}, ...]
 ```
+
+## Guía de Uso para Decisiones
+
+### Cuándo Confiar en las Predicciones
+
+| Escenario | Recomendación |
+|-----------|---------------|
+| Predicción cerca de datos train | ✅ Mayor confianza |
+| Predicción en extremos (< 100 K o > 800 K) | ⚠️ Menos datos de referencia |
+| Molécula muy diferente al dataset | ⚠️ Extrapolar con cautela |
+| Decisión crítica de seguridad | 🔬 Verificar experimentalmente |
+
+### Flujo de Trabajo Recomendado
+
+1. **Validar SMILES** → `/validate-smiles`
+2. **Verificar nombre** → `/compound-name` (PubChem)
+3. **Comparar con dataset** → Ver distribución en `/data-all`
+4. **Predecir** → `/compounds` (crea registro con predicción)
+5. **Interpretar** → Considerar ±22.80 K de incertidumbre
 
 ## requirements.txt
 ```txt

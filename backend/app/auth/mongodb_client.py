@@ -15,13 +15,16 @@ logger = logging.getLogger(__name__)
 MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
 MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "melting_point_db")
 
-# Cliente asíncrono (para FastAPI)
+# Cliente asincrono (para FastAPI)
 _async_client: Optional[AsyncIOMotorClient] = None
 _async_db = None
 
-# Cliente síncrono (para scripts)
+# Cliente sincrono (para scripts)
 _sync_client: Optional[MongoClient] = None
 _sync_db = None
+
+# Flag para saber si MongoDB esta disponible
+_mongodb_available = None
 
 
 def get_async_database():
@@ -69,16 +72,32 @@ async def close_mongodb_connection():
         logger.info("✓ Conexión MongoDB sync cerrada")
 
 
-async def test_mongodb_connection():
-    """Prueba la conexión a MongoDB"""
+async def test_mongodb_connection(timeout_ms: int = 3000):
+    """Prueba la conexion a MongoDB con timeout corto"""
+    global _async_client, _async_db, _mongodb_available
+
+    if _mongodb_available is not None:
+        return _mongodb_available
+
     try:
-        db = get_async_database()
-        # Ping a la base de datos
-        await db.command('ping')
-        logger.info("✓ MongoDB connection successful")
+        # Crear cliente con timeout corto para prueba rapida
+        test_client = AsyncIOMotorClient(
+            MONGODB_URL,
+            serverSelectionTimeoutMS=timeout_ms,
+            connectTimeoutMS=timeout_ms
+        )
+        # Intentar ping
+        await test_client.admin.command('ping')
+
+        # Conexion exitosa - usar este cliente
+        _async_client = test_client
+        _async_db = _async_client[MONGODB_DB_NAME]
+        _mongodb_available = True
+        logger.info("[OK] MongoDB connection successful")
         return True
     except Exception as e:
-        logger.error(f"✗ MongoDB connection failed: {e}")
+        _mongodb_available = False
+        logger.warning(f"[WARN] MongoDB not available: {type(e).__name__}")
         return False
 
 
