@@ -1,0 +1,43 @@
+{
+  "xgboost": {
+    "n_estimators": 1700,
+    "max_depth": 5,
+    "learning_rate": 0.022737539357929656,
+    "subsample": 0.8044436217829527,
+    "colsample_bytree": 0.8361613102654414,
+    "reg_lambda": 3.27296710788495,
+    "reg_alpha": 0.3959246285325068,
+    "min_child_weight": 5,
+    "random_state": 42,
+    "n_jobs": -1,
+    "tree_method": "hist"
+  },
+  "lightgbm": {
+    "n_estimators": 2128,
+    "max_depth": 13,
+    "num_leaves": 38,
+    "learning_rate": 0.022064658486324117,
+    "subsample": 0.7440775327447872,
+    "colsample_bytree": 0.762506138949309,
+    "reg_lambda": 1.7652300003874324,
+    "reg_alpha": 0.21604705696881807,
+    "min_child_samples": 12,
+    "random_state": 42,
+    "n_jobs": -1,
+    "verbose": -1
+  },
+  "catboost": {
+    "iterations": 2308,
+    "depth": 8,
+    "learning_rate": 0.048784028855008155,
+    "l2_leaf_reg": 1.1353662992588172,
+    "random_seed": 42,
+    "verbose": false
+  },
+  "weights": {
+    "XGBoost": 0.1747251663887043,
+    "LightGBM": 0.29780501408485854,
+    "CatBoost": 0.5274698195264371
+  },
+  "ensemble_oof_mae": 26.636789839666758
+}

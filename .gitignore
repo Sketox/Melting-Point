@@ -14,8 +14,6 @@ __pycache__/
 .venv/
 venv/
 env/
-
-# Entornos con herramientas
 .env/
 .venv*/
 .env*/
@@ -51,20 +49,14 @@ Thumbs.db
 desktop.ini
 
 # =========================
-# Datos y artefactos de modelo
+# Datos
 # =========================
 
-# Datos crudos de Kaggle (mejor no subirlos al repo)
+# Datos crudos de Kaggle (muy pesados, descargar de Kaggle)
 data/raw/
-# Si quieres subir los CSV, comenta la línea anterior.
 
-# Datos procesados pesados / generados
+# Datos procesados generados
 data/processed/test_processed.csv
-
-# Modelos entrenados
-backend/models/model.joblib
-*.joblib
-*.pkl
 
 # Submissions de Kaggle
 submissions/
@@ -74,11 +66,36 @@ submissions/
 *.tar.gz
 
 # =========================
+# Modelos - IMPORTANTE
+# =========================
+
+# Ignorar modelos genéricos EXCEPTO los del backend
+*.pkl
+
+# Ignorar carpetas de modelos experimentales (muy pesadas)
+backend/models/chemprop_max/
+backend/models/chemprop_max_precision/
+backend/models/chemprop_v1_max/
+backend/models/chemprop_v2_max/
+
+# ⚠️ NO IGNORAR (necesarios para el backend):
+# - backend/models/model_chemprop/     → ChemProp 5 folds (~50 MB)
+# - backend/models/ensemble_predictor.joblib → Ensemble XGB+LGB+CAT (~100 MB)
+# - backend/models/model.joblib        → Fallback sklearn (~5 MB)
+# - backend/models/best_params_paso6.json → Hiperparámetros (~2 KB)
+
+# =========================
+# Archivos temporales del backend
+# =========================
+backend/data/user_compounds.csv
+backend/app/__pycache__/
+
+# =========================
 # Otros
 # =========================
 reports/figures/*.png
 reports/figures/*.jpg
 reports/figures/*.jpeg
-backend/app/__pycache__
-backend/app/__pycache__
-CLAUDE.md
+
+# CatBoost info (generado automáticamente)
+catboost_info/
