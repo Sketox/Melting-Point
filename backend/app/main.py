@@ -7,6 +7,10 @@ ACTUALIZADO:
 - Manejo mejorado de errores para SMILES inválidos
 """
 
+# Cargar variables de entorno ANTES de cualquier otra importación
+from dotenv import load_dotenv
+load_dotenv()
+
 from typing import List, Optional, Dict
 import httpx
 
@@ -44,8 +48,10 @@ from .auth import (
     get_async_database,
     create_indexes,
     test_mongodb_connection,
-    close_mongodb_connection
+    close_mongodb_connection,
+    seed_compounds_from_csv
 )
+from .config import TRAIN_DATASET_PATH, TEST_DATASET_PATH
 
 # Metadata para tags de la documentación
 tags_metadata = [
@@ -173,6 +179,14 @@ async def startup_event() -> None:
         if connection_ok:
             await create_indexes()
             print("[OK] MongoDB conectado y listo")
+
+            # Seed: cargar dataset completo en MongoDB si está vacío
+            if ml_service is not None:
+                await seed_compounds_from_csv(
+                    train_csv_path=TRAIN_DATASET_PATH,
+                    test_csv_path=TEST_DATASET_PATH,
+                    predictions_cache=ml_service._predictions_cache
+                )
         else:
             print("[WARN] MongoDB no disponible - funcionalidades de usuario deshabilitadas")
     except Exception as e:
@@ -437,9 +451,9 @@ def predict_all():
     response_model=List[DataItemResponse],
     tags=["🔬 Predictions"],
     summary="📊 Todos los Datos (Train + Test + Usuario)",
-    description="Obtiene todos los datos: train (Tm real), test (Tm predicho) y compuestos de usuario."
+    description="Obtiene todos los datos: train (Tm real), test (Tm predicho) y compuestos de usuario. Incluye nombres."
 )
-def get_all_data():
+async def get_all_data():
     """
     Retorna todos los datos del sistema para visualización y toma de decisiones.
 
@@ -454,16 +468,43 @@ def get_all_data():
     - `smiles`: Estructura SMILES
     - `Tm_pred`: Temperatura de fusión (K)
     - `source`: Fuente (train/test/user)
+    - `name`: Nombre del compuesto (si disponible)
 
     **Ejemplo de respuesta:**
     ```json
     [
-        {"id": 2175, "smiles": "FC1=C(F)C(F)(F)C1(F)F", "Tm_pred": 213.15, "source": "train"},
-        {"id": 1022, "smiles": "CCOC(=O)c1ccc(O)cc1", "Tm_pred": 358.66, "source": "test"},
-        {"id": "USR_001", "smiles": "CCO", "Tm_pred": 159.05, "source": "user"}
+        {"id": 2175, "smiles": "FC1=C(F)C(F)(F)C1(F)F", "Tm_pred": 213.15, "source": "train", "name": "hexafluorocyclobutene"},
+        {"id": 1022, "smiles": "CCOC(=O)c1ccc(O)cc1", "Tm_pred": 358.66, "source": "test", "name": "ethyl 4-hydroxybenzoate"},
+        {"id": "USR_001", "smiles": "CCO", "Tm_pred": 159.05, "source": "user", "name": "Ethanol"}
     ]
     ```
     """
+    from .auth.mongodb_client import Collections
+
+    # Intentar leer desde MongoDB primero
+    try:
+        db = get_async_database()
+        if db is not None:
+            count = await db[Collections.COMPOUNDS].count_documents({})
+            if count > 0:
+                cursor = db[Collections.COMPOUNDS].find({})
+                mongo_data = await cursor.to_list(length=10000)
+
+                return [
+                    DataItemResponse(
+                        id=item.get("compound_id", str(item.get("_id", ""))),
+                        smiles=item.get("smiles", ""),
+                        Tm_pred=round(item.get("Tm", 0), 2),
+                        source=item.get("source", "unknown"),
+                        name=item.get("name")
+                    )
+                    for item in mongo_data
+                    if item.get("Tm") is not None
+                ]
+    except Exception as e:
+        print(f"Warning: No se pudo leer desde MongoDB, usando CSV: {e}")
+
+    # Fallback a CSV si MongoDB no tiene datos
     if ml_service is None:
         raise HTTPException(status_code=500, detail="MLService no está inicializado.")
 
@@ -474,7 +515,8 @@ def get_all_data():
             id=item["id"],
             smiles=item["smiles"],
             Tm_pred=round(item["Tm_pred"], 2),
-            source=item["source"]
+            source=item["source"],
+            name=item.get("name")
         )
         for item in all_data
     ]
@@ -616,37 +658,37 @@ def get_predictions_range(
     response_model=CompoundResponse,
     tags=["🧪 Compounds"],
     summary="➕ Agregar Compuesto",
-    description="Agrega un nuevo compuesto al dataset y predice su punto de fusión.",
+    description="Agrega un nuevo compuesto al dataset y predice su punto de fusión. También guarda en MongoDB.",
     status_code=201
 )
-def create_compound(request: CompoundCreateRequest):
+async def create_compound(request: CompoundCreateRequest):
     """
     Agrega un nuevo compuesto validando su estructura SMILES.
-    
+
     **Proceso:**
     1. Valida el SMILES con RDKit
     2. Genera predicción de Tm usando ChemProp
-    3. Guarda el compuesto en CSV local
+    3. Guarda el compuesto en CSV local Y en MongoDB
     4. Retorna información completa
-    
+
     **Parámetros:**
     - `smiles`: Estructura SMILES válida (string)
     - `name`: Nombre del compuesto (string, opcional)
-    
+
     **Ejemplos válidos:**
     ```json
     {"smiles": "CCO", "name": "Etanol"}
     {"smiles": "c1ccccc1", "name": "Benceno"}
     {"smiles": "CC(=O)Oc1ccccc1C(=O)O", "name": "Aspirina"}
     ```
-    
+
     **Error 400 (SMILES inválido):**
     ```json
     {
         "detail": "SMILES inválido: Invalid SMILES syntax"
     }
     ```
-    
+
     **Respuesta exitosa (201):**
     ```json
     {
@@ -661,6 +703,9 @@ def create_compound(request: CompoundCreateRequest):
     }
     ```
     """
+    from datetime import datetime
+    from .auth.mongodb_client import Collections
+
     if ml_service is None:
         raise HTTPException(status_code=500, detail="MLService no está inicializado.")
 
@@ -668,7 +713,7 @@ def create_compound(request: CompoundCreateRequest):
         compound = ml_service.add_user_compound(request.smiles, request.name)
     except SMILESValidationError as e:
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail=f"SMILES inválido: {str(e)}"
         )
     except Exception as e:
@@ -677,10 +722,32 @@ def create_compound(request: CompoundCreateRequest):
         print(f"Error creating compound: {e}")
         print(traceback.format_exc())
         raise HTTPException(
-            status_code=500, 
+            status_code=500,
             detail=f"Error interno al crear compuesto: {str(e)}"
         )
-    
+
+    # Guardar en MongoDB tambien
+    try:
+        db = get_async_database()
+        if db is not None:
+            mongo_compound = {
+                "compound_id": compound["id"],
+                "smiles": compound["smiles"],
+                "Tm": compound["Tm_pred"],
+                "Tm_celsius": compound["Tm_celsius"],
+                "name": compound["name"],
+                "source": "user",
+                "is_experimental": False,
+                "method": compound.get("method", "combined"),
+                "uncertainty": compound.get("uncertainty", "±23 K"),
+                "created_at": compound.get("created_at", datetime.utcnow().isoformat()),
+            }
+            await db[Collections.COMPOUNDS].insert_one(mongo_compound)
+            print(f"[OK] Compuesto guardado en MongoDB: {compound['id']}")
+    except Exception as e:
+        # No fallar si MongoDB no esta disponible, ya se guardo en CSV
+        print(f"Warning: No se pudo guardar en MongoDB: {e}")
+
     return CompoundResponse(
         id=compound["id"],
         smiles=compound["smiles"],
@@ -767,7 +834,7 @@ def get_compounds():
     summary="🗑️ Eliminar Compuesto",
     description="Elimina un compuesto agregado por el usuario."
 )
-def delete_compound(compound_id: str):
+async def delete_compound(compound_id: str):
     """
     Elimina un compuesto del dataset local.
     
@@ -789,17 +856,27 @@ def delete_compound(compound_id: str):
     }
     ```
     """
+    from .auth.mongodb_client import Collections
+
     if ml_service is None:
         raise HTTPException(status_code=500, detail="MLService no está inicializado.")
 
     success = ml_service.delete_user_compound(compound_id)
-    
+
     if not success:
         raise HTTPException(
-            status_code=404, 
+            status_code=404,
             detail=f"Compuesto {compound_id} no encontrado"
         )
-    
+
+    # Eliminar de MongoDB también
+    try:
+        db = get_async_database()
+        if db is not None:
+            await db[Collections.COMPOUNDS].delete_one({"compound_id": compound_id})
+    except Exception as e:
+        print(f"Warning: No se pudo eliminar de MongoDB: {e}")
+
     return DeleteResponse(
         message="Compuesto eliminado exitosamente",
         deleted_id=compound_id

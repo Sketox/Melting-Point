@@ -98,6 +98,7 @@ class DataItemResponse(BaseModel):
     smiles: str = Field(..., description="Estructura SMILES")
     Tm_pred: float = Field(..., description="Punto de fusión (K) - real para train, predicho para test/user")
     source: str = Field(..., description="Fuente: train (real), test (predicción), user")
+    name: Optional[str] = Field(None, description="Nombre del compuesto (de PubChem o definido por usuario)")
 
 
 class StatsResponse(BaseModel):

@@ -184,14 +184,20 @@ class MLService:
 
         if train_path and train_path.exists():
             try:
-                self.train_dataset = pd.read_csv(train_path)
+                # Cargar solo columnas necesarias
+                df = pd.read_csv(train_path, usecols=['id', 'SMILES', 'Tm', 'name'])
+                df = df.rename(columns={'SMILES': 'smiles'})
+                self.train_dataset = df
                 print(f"INFO: Dataset train cargado ({len(self.train_dataset)} registros)")
             except Exception as e:
                 print(f"WARNING: Error cargando train dataset: {e}")
 
         if test_path and test_path.exists():
             try:
-                self.test_dataset = pd.read_csv(test_path)
+                # Cargar solo columnas necesarias (test no tiene Tm)
+                df = pd.read_csv(test_path, usecols=['id', 'SMILES', 'name'])
+                df = df.rename(columns={'SMILES': 'smiles'})
+                self.test_dataset = df
                 print(f"INFO: Dataset test cargado ({len(self.test_dataset)} registros)")
             except Exception as e:
                 print(f"WARNING: Error cargando test dataset: {e}")
@@ -667,41 +673,61 @@ class MLService:
 
     def get_all_data(self) -> List[Dict[str, Any]]:
         """
-        Retorna todos los datos: train (real), test (predicción), user.
+        Retorna todos los datos: train (real), test (prediccion), user.
 
         Returns:
-            Lista de diccionarios con id, smiles, Tm, source
+            Lista de diccionarios con id, smiles, Tm, source, name
         """
         all_data = []
+
+        # Crear diccionario de predicciones para test
+        predictions_dict = {sid: pred for sid, pred in self._predictions_cache}
 
         # 1. Datos de train (Tm REAL)
         if self.train_dataset is not None:
             for _, row in self.train_dataset.iterrows():
+                name = row.get("name", None)
+                if pd.isna(name):
+                    name = None
                 all_data.append({
                     "id": int(row["id"]),
                     "smiles": row.get("smiles", ""),
                     "Tm_pred": float(row["Tm"]),
-                    "source": "train"
+                    "source": "train",
+                    "name": name
                 })
 
-        # 2. Datos de test (Tm PREDICHO)
+        # 2. Datos de test (Tm PREDICHO desde cache)
         if self.test_dataset is not None:
             for _, row in self.test_dataset.iterrows():
+                sample_id = int(row["id"])
+                tm_pred = predictions_dict.get(sample_id, None)
+                if tm_pred is None:
+                    continue  # Skip si no hay prediccion
+
+                name = row.get("name", None)
+                if pd.isna(name):
+                    name = None
                 all_data.append({
-                    "id": int(row["id"]),
+                    "id": sample_id,
                     "smiles": row.get("smiles", ""),
-                    "Tm_pred": float(row["Tm"]),
-                    "source": "test"
+                    "Tm_pred": float(tm_pred),
+                    "source": "test",
+                    "name": name
                 })
 
         # 3. Compuestos de usuario
         if not self.user_compounds_df.empty:
             for _, row in self.user_compounds_df.iterrows():
+                name = row.get("name", None)
+                if pd.isna(name):
+                    name = None
                 all_data.append({
                     "id": str(row["id"]),
                     "smiles": row.get("smiles", ""),
                     "Tm_pred": float(row["Tm_pred"]),
-                    "source": "user"
+                    "source": "user",
+                    "name": name
                 })
 
         return all_data
@@ -740,12 +766,76 @@ class MLService:
         return False
 
     def get_predictions_by_functional_group(self) -> Dict[str, Any]:
-        """Análisis por grupos funcionales."""
-        # Implementación simplificada
+        """Análisis por grupos funcionales usando SMARTS patterns."""
+        if not RDKIT_AVAILABLE:
+            return {
+                "total_molecules": 0,
+                "groups": [],
+                "note": "RDKit no disponible"
+            }
+
+        # Definir patrones SMARTS para grupos funcionales
+        functional_group_patterns = [
+            {"name": "Alcohols (OH)", "smarts": "[OX2H]"},
+            {"name": "Carboxylic Acids", "smarts": "[CX3](=O)[OX2H1]"},
+            {"name": "Amines (NH2/NHR)", "smarts": "[NX3;H2,H1;!$(NC=O)]"},
+            {"name": "Amides", "smarts": "[NX3][CX3](=[OX1])"},
+            {"name": "Esters", "smarts": "[CX3](=O)[OX2][#6]"},
+            {"name": "Ketones", "smarts": "[CX3](=[OX1])([#6])[#6]"},
+            {"name": "Aldehydes", "smarts": "[CX3H1](=O)[#6]"},
+            {"name": "Ethers", "smarts": "[OD2]([#6])[#6]"},
+            {"name": "Halogenated (F,Cl,Br,I)", "smarts": "[F,Cl,Br,I]"},
+            {"name": "Aromatic Rings", "smarts": "c1ccccc1"},
+            {"name": "Nitro Groups", "smarts": "[NX3](=O)=O"},
+            {"name": "Sulfides/Thiols", "smarts": "[#16X2]"},
+        ]
+
+        # Obtener todos los datos con SMILES
+        all_data = self.get_all_data()
+
+        groups_data = []
+
+        for fg in functional_group_patterns:
+            try:
+                pattern = Chem.MolFromSmarts(fg["smarts"])
+                if pattern is None:
+                    continue
+
+                matching_tms = []
+
+                for item in all_data:
+                    smiles = item.get("smiles", "")
+                    if not smiles:
+                        continue
+
+                    mol = Chem.MolFromSmiles(smiles)
+                    if mol is None:
+                        continue
+
+                    if mol.HasSubstructMatch(pattern):
+                        matching_tms.append(item["Tm_pred"])
+
+                if len(matching_tms) > 0:
+                    groups_data.append({
+                        "name": fg["name"],
+                        "pattern": fg["smarts"],
+                        "count": len(matching_tms),
+                        "avg_tm": round(np.mean(matching_tms), 2),
+                        "min_tm": round(min(matching_tms), 2),
+                        "max_tm": round(max(matching_tms), 2),
+                        "std_tm": round(np.std(matching_tms), 2) if len(matching_tms) > 1 else 0
+                    })
+            except Exception as e:
+                print(f"WARNING: Error procesando grupo {fg['name']}: {e}")
+                continue
+
+        # Ordenar por cantidad descendente
+        groups_data.sort(key=lambda x: x["count"], reverse=True)
+
         return {
-            "total_molecules": len(self._predictions_cache),
-            "groups": [],
-            "note": "Análisis por grupos funcionales"
+            "total_molecules": len(all_data),
+            "groups": groups_data,
+            "note": "Análisis basado en patrones SMARTS"
         }
 
     def get_distribution(self) -> Dict[str, Any]:
@@ -774,9 +864,48 @@ class MLService:
         return {"total": total, "categories": categories}
 
     def get_predictions_by_molecule_size(self) -> Dict[str, Any]:
-        """Análisis por tamaño molecular."""
+        """Análisis por tamaño molecular basado en longitud de SMILES."""
+        # Definir rangos de tamaño (longitud de SMILES)
+        size_bins = [
+            {"name": "Muy pequeno (1-10)", "min": 1, "max": 10},
+            {"name": "Pequeno (11-20)", "min": 11, "max": 20},
+            {"name": "Mediano (21-35)", "min": 21, "max": 35},
+            {"name": "Grande (36-50)", "min": 36, "max": 50},
+            {"name": "Muy grande (51-75)", "min": 51, "max": 75},
+            {"name": "Enorme (>75)", "min": 76, "max": 999},
+        ]
+
+        # Obtener todos los datos con SMILES
+        all_data = self.get_all_data()
+
+        size_groups = []
+
+        for size_bin in size_bins:
+            matching_tms = []
+
+            for item in all_data:
+                smiles = item.get("smiles", "")
+                if not smiles:
+                    continue
+
+                smiles_length = len(smiles)
+                if size_bin["min"] <= smiles_length <= size_bin["max"]:
+                    matching_tms.append(item["Tm_pred"])
+
+            if len(matching_tms) > 0:
+                size_groups.append({
+                    "name": size_bin["name"],
+                    "smiles_length_min": size_bin["min"],
+                    "smiles_length_max": size_bin["max"],
+                    "count": len(matching_tms),
+                    "avg_tm": round(np.mean(matching_tms), 2),
+                    "min_tm": round(min(matching_tms), 2),
+                    "max_tm": round(max(matching_tms), 2),
+                    "std_tm": round(np.std(matching_tms), 2) if len(matching_tms) > 1 else 0
+                })
+
         return {
-            "total_molecules": len(self._predictions_cache),
-            "size_groups": [],
-            "note": "Análisis por tamaño molecular"
+            "total_molecules": len(all_data),
+            "size_groups": size_groups,
+            "note": "Tamaño basado en longitud de SMILES"
         }

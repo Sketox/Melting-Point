@@ -4,10 +4,11 @@ Manejo de JWT, hashing de contraseñas, validación
 """
 
 import os
+import hashlib
 from datetime import datetime, timedelta
 from typing import Optional, Dict
 from jose import JWTError, jwt
-from passlib.context import CryptContext
+import bcrypt
 from fastapi import HTTPException, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import logging
@@ -22,9 +23,6 @@ SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev_secret_key_change_in_production")
 ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
-# Context para hash de contraseñas con bcrypt (12 rounds por defecto)
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 # Security scheme para FastAPI
 security = HTTPBearer()
 
@@ -33,26 +31,35 @@ class AuthService:
     """Servicio de autenticación"""
     
     @staticmethod
+    def _prehash_password(password: str) -> bytes:
+        """
+        Pre-hash de la contraseña con SHA-256 para evitar el limite de 72 bytes de bcrypt.
+        El hash SHA-256 hexadecimal es siempre 64 caracteres (bien debajo de 72 bytes).
+        """
+        return hashlib.sha256(password.encode('utf-8')).hexdigest().encode('utf-8')
+
+    @staticmethod
     def hash_password(password: str) -> str:
         """
-        Hashea una contraseña usando bcrypt
-        Bcrypt tiene límite de 72 bytes, se trunca automáticamente
+        Hashea una contraseña usando bcrypt directamente.
+        Pre-hashea con SHA-256 para soportar contraseñas de cualquier longitud.
         """
-        # Truncar a 72 bytes para evitar error de bcrypt
-        password_bytes = password.encode('utf-8')[:72]
-        password_truncated = password_bytes.decode('utf-8', errors='ignore')
-        return pwd_context.hash(password_truncated)
-    
+        prehashed = AuthService._prehash_password(password)
+        salt = bcrypt.gensalt(rounds=12)
+        hashed = bcrypt.hashpw(prehashed, salt)
+        return hashed.decode('utf-8')
+
     @staticmethod
     def verify_password(plain_password: str, hashed_password: str) -> bool:
         """
-        Verifica una contraseña contra su hash
-        Trunca a 72 bytes para consistencia con bcrypt
+        Verifica una contraseña contra su hash.
+        Usa el mismo pre-hash SHA-256 que hash_password.
         """
-        # Truncar a 72 bytes igual que en hash_password
-        password_bytes = plain_password.encode('utf-8')[:72]
-        password_truncated = password_bytes.decode('utf-8', errors='ignore')
-        return pwd_context.verify(password_truncated, hashed_password)
+        prehashed = AuthService._prehash_password(plain_password)
+        try:
+            return bcrypt.checkpw(prehashed, hashed_password.encode('utf-8'))
+        except Exception:
+            return False
     
     @staticmethod
     def create_access_token(data: Dict, expires_delta: Optional[timedelta] = None) -> str:

@@ -14,6 +14,7 @@ from .mongodb_client import (
     create_indexes,
     test_mongodb_connection,
     close_mongodb_connection,
+    seed_compounds_from_csv,
     Collections
 )
 
@@ -44,6 +45,7 @@ __all__ = [
     "create_indexes",
     "test_mongodb_connection",
     "close_mongodb_connection",
+    "seed_compounds_from_csv",
     "Collections",
     
     # Schemas

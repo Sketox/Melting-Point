@@ -22,15 +22,15 @@ CHEMPROP_MODEL_DIR = os.getenv(
 # Rutas de datos
 DATA_DIR = BASE_DIR.parent / "data"
 
-# Datasets procesados (train con Tm real, test con Tm predicho)
+# Datasets con nombres (train con Tm real, test con predicciones)
 TRAIN_DATASET_PATH = os.getenv(
     "TRAIN_DATASET_PATH",
-    str(DATA_DIR / "processed" / "dataset_train.csv")
+    str(DATA_DIR / "raw" / "train_with_names.csv")
 )
 
 TEST_DATASET_PATH = os.getenv(
     "TEST_DATASET_PATH",
-    str(DATA_DIR / "processed" / "dataset_test.csv")
+    str(DATA_DIR / "raw" / "test_with_names.csv")
 )
 
 # Legacy paths (para compatibilidad)
