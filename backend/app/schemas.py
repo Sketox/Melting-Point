@@ -24,6 +24,7 @@ class CompoundCreateRequest(BaseModel):
     """Request para crear un compuesto de usuario."""
     smiles: str = Field(..., description="Estructura SMILES de la molécula", min_length=1)
     name: str = Field(..., description="Nombre del compuesto", min_length=1)
+    created_by: Optional[str] = Field(None, description="Username del creador")
 
 
 class ValidateSmilesRequest(BaseModel):
@@ -99,6 +100,7 @@ class DataItemResponse(BaseModel):
     Tm_pred: float = Field(..., description="Punto de fusión (K) - real para train, predicho para test/user")
     source: str = Field(..., description="Fuente: train (real), test (predicción), user")
     name: Optional[str] = Field(None, description="Nombre del compuesto (de PubChem o definido por usuario)")
+    created_by: Optional[str] = Field(None, description="Username del usuario que subio el compuesto")
 
 
 class StatsResponse(BaseModel):

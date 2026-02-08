@@ -13,9 +13,11 @@ load_dotenv()
 
 from typing import List, Optional, Dict
 import httpx
+import io
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from .ml_service import MLService, SMILESValidationError
 from .schemas import (
@@ -88,49 +90,47 @@ tags_metadata = [
 app = FastAPI(
     title="🔥 Melting Point Prediction API",
     description="""
-    ## 🎯 Descripción
+    🎯 Descripción
     API completa para predecir el punto de fusión (Tm) de compuestos orgánicos usando Machine Learning.
     
-    ## ✨ Características Principales
+    ✨ Características Principales
     
-    ### 🤖 Machine Learning
-    - **Modelo**: ChemProp Ensemble (5 checkpoints)
-    - **Precisión**: MAE ±29 K
-    - **Dataset**: 666 compuestos pre-calculados
-    - **Validación**: RDKit para estructuras SMILES
+    🤖 Machine Learning
+    - Modelo: ChemProp Ensemble (5 checkpoints)
+    - Precisión: MAE ±29 K
+    - Dataset: 666 compuestos pre-calculados
+    - Validación: RDKit para estructuras SMILES
     
-    ### 🔐 Autenticación
+    🔐 Autenticación
     - Sistema completo de usuarios con MongoDB
     - JWT tokens seguros
     - Gestión de predicciones por usuario
     
-    ### 📊 Analytics
+    📊 Analytics
     - Estadísticas del dataset
     - Filtrado por rango de temperatura
     - Análisis de grupos funcionales
     - Distribución por categorías
     
-    ### 🗄️ Base de Datos
-    - **MongoDB Atlas**: Autenticación y datos de usuario
+     🗄️ Base de Datos
+    - MongoDB Atlas: Autenticación y datos de usuario
     
-    ## 🚀 Inicio Rápido
+    🚀 Inicio Rápido
     
-    1. **Health Check**: `GET /health`
-    2. **Registrarse**: `POST /auth/register`
-    3. **Login**: `POST /auth/login`
-    4. **Predecir**: `POST /predict-by-id?id=123`
+    1. Health Check: `GET /health`
+    2. Registrarse: `POST /auth/register`
+    3. Login: `POST /auth/login`
+    4. Predecir: `POST /predict-by-id?id=123`
     
-    ## 📖 Documentación
+    📖 Documentación
     
-    - **Swagger UI**: `/docs` (esta página)
-    - **ReDoc**: `/redoc`
-    - **OpenAPI Schema**: `/openapi.json`
+    - Swagger UI: `/docs` (esta página)
+    - ReDoc: `/redoc`
+    - OpenAPI Schema: `/openapi.json`
     
-    ## 🏆 Competencia
+    🏆 Competencia
     [Kaggle - Thermophysical Property: Melting Point](https://www.kaggle.com/competitions/playground-series-s5e6)
     
-    ## 👥 Equipo
-    Desarrollado para Kaggle Playground Series S5E6
     """,
     version="2.1.0",
     contact={
@@ -496,7 +496,8 @@ async def get_all_data():
                         smiles=item.get("smiles", ""),
                         Tm_pred=round(item.get("Tm", 0), 2),
                         source=item.get("source", "unknown"),
-                        name=item.get("name")
+                        name=item.get("name"),
+                        created_by=item.get("created_by")
                     )
                     for item in mongo_data
                     if item.get("Tm") is not None
@@ -741,8 +742,13 @@ async def create_compound(request: CompoundCreateRequest):
                 "method": compound.get("method", "combined"),
                 "uncertainty": compound.get("uncertainty", "±23 K"),
                 "created_at": compound.get("created_at", datetime.utcnow().isoformat()),
+                "created_by": request.created_by,
             }
-            await db[Collections.COMPOUNDS].insert_one(mongo_compound)
+            await db[Collections.COMPOUNDS].replace_one(
+                {"compound_id": compound["id"]},
+                mongo_compound,
+                upsert=True
+            )
             print(f"[OK] Compuesto guardado en MongoDB: {compound['id']}")
     except Exception as e:
         # No fallar si MongoDB no esta disponible, ya se guardo en CSV
@@ -1113,4 +1119,197 @@ async def get_compound_name(smiles: str = Query(..., description="SMILES del com
         smiles=smiles,
         name="Unknown",
         source="unknown"
+    )
+
+
+# ============================================
+# 9. DECISION SUPPORT - Recomendaciones y Reportes
+# ============================================
+
+@app.post(
+    "/api/recommend-similar",
+    tags=["🧪 Compounds"],
+    summary="🔍 Recomendar Compuestos Similares",
+    description="Busca compuestos similares por fingerprint Tanimoto.",
+)
+def recommend_similar(request: dict):
+    """
+    Busca compuestos similares usando similitud Tanimoto (Morgan FP).
+    """
+    if ml_service is None:
+        raise HTTPException(status_code=500, detail="MLService no inicializado.")
+
+    smiles = request.get("smiles", "")
+    props = request.get("property_requirements", {})
+    min_similarity = props.get("min_similarity", 0.35)
+    max_results = props.get("max_results", 5)
+
+    if not smiles:
+        raise HTTPException(status_code=400, detail="SMILES es requerido")
+
+    from rdkit import Chem
+    from rdkit.Chem import AllChem, DataStructs
+
+    query_mol = Chem.MolFromSmiles(smiles)
+    if query_mol is None:
+        raise HTTPException(status_code=400, detail="SMILES invalido")
+
+    query_fp = AllChem.GetMorganFingerprintAsBitVect(query_mol, 2, nBits=2048)
+
+    all_data = ml_service.get_all_data()
+    scored = []
+
+    for item in all_data:
+        if item["smiles"] == smiles:
+            continue
+        mol = Chem.MolFromSmiles(item["smiles"])
+        if mol is None:
+            continue
+        fp = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
+        sim = DataStructs.TanimotoSimilarity(query_fp, fp)
+        if sim >= min_similarity:
+            scored.append({
+                "smiles": item["smiles"],
+                "similarity": round(sim, 4),
+                "Tm_pred": round(item["Tm_pred"], 2),
+                "source": item["source"],
+                "name": item.get("name"),
+            })
+
+    scored.sort(key=lambda x: x["similarity"], reverse=True)
+    results = scored[:max_results]
+
+    return {"query_smiles": smiles, "results": results}
+
+
+@app.get(
+    "/api/generate-report/{prediction_id}",
+    tags=["🧪 Compounds"],
+    summary="📄 Generar Reporte PDF",
+    description="Genera un reporte tecnico PDF para un compuesto.",
+)
+def generate_report(prediction_id: str):
+    """
+    Genera un PDF con el analisis del compuesto.
+    """
+    if ml_service is None:
+        raise HTTPException(status_code=500, detail="MLService no inicializado.")
+
+    all_data = ml_service.get_all_data()
+    compound = None
+    for item in all_data:
+        if str(item["id"]) == prediction_id:
+            compound = item
+            break
+
+    if compound is None:
+        raise HTTPException(status_code=404, detail=f"Compuesto {prediction_id} no encontrado")
+
+    from fpdf import FPDF
+
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
+
+    # Title
+    pdf.set_font("Helvetica", "B", 20)
+    pdf.cell(0, 12, "Melting Point - Reporte Tecnico", new_x="LMARGIN", new_y="NEXT", align="C")
+    pdf.ln(4)
+
+    # Divider
+    pdf.set_draw_color(218, 119, 86)
+    pdf.set_line_width(0.8)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+    pdf.ln(8)
+
+    # Compound info
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.cell(0, 10, "Informacion del Compuesto", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(2)
+
+    pdf.set_font("Helvetica", "", 11)
+    name = compound.get("name") or "No disponible"
+    source_label = {"train": "Train (Real)", "test": "Test (Prediccion)", "user": "Usuario"}.get(compound["source"], compound["source"])
+    tm_c = round(compound["Tm_pred"] - 273.15, 2)
+
+    rows = [
+        ("ID", str(compound["id"])),
+        ("Nombre", name),
+        ("SMILES", compound["smiles"]),
+        ("Punto de fusion", f"{compound['Tm_pred']:.2f} K  ({tm_c:.2f} C)"),
+        ("Fuente", source_label),
+        ("Incertidumbre", "Valor medido" if compound["source"] == "train" else "+-22.80 K (MAE Kaggle)"),
+    ]
+
+    for label, value in rows:
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.cell(45, 8, f"{label}:")
+        pdf.set_font("Helvetica", "", 11)
+        # Truncate long SMILES
+        display_val = value if len(value) <= 80 else value[:77] + "..."
+        pdf.cell(0, 8, display_val, new_x="LMARGIN", new_y="NEXT")
+
+    pdf.ln(6)
+
+    # Model info
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.cell(0, 10, "Modelo Utilizado", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(2)
+
+    pdf.set_font("Helvetica", "", 11)
+    model_rows = [
+        ("Arquitectura", "20% ChemProp D-MPNN + 80% Ensemble (XGB+LGB)"),
+        ("MAE validado", "22.80 K (Kaggle test set)"),
+        ("Dataset train", "2,662 compuestos con Tm real"),
+        ("Dataset test", "666 compuestos con Tm predicho"),
+    ]
+    for label, value in model_rows:
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.cell(45, 8, f"{label}:")
+        pdf.set_font("Helvetica", "", 11)
+        pdf.cell(0, 8, value, new_x="LMARGIN", new_y="NEXT")
+
+    pdf.ln(6)
+
+    # Context
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.cell(0, 10, "Contexto Estadistico", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(2)
+
+    stats = ml_service.get_stats()
+    pdf.set_font("Helvetica", "", 11)
+    pdf.cell(0, 7, f"Rango del dataset: {stats['min']:.1f} K - {stats['max']:.1f} K", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 7, f"Media: {stats['mean']:.1f} K  |  Mediana: {stats['median']:.1f} K", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 7, f"Desviacion estandar: {stats['std']:.1f} K", new_x="LMARGIN", new_y="NEXT")
+
+    tm = compound["Tm_pred"]
+    if tm < stats["q25"]:
+        position = "por debajo del primer cuartil (Q1)"
+    elif tm < stats["median"]:
+        position = "entre Q1 y la mediana"
+    elif tm < stats["q75"]:
+        position = "entre la mediana y Q3"
+    else:
+        position = "por encima del tercer cuartil (Q3)"
+
+    pdf.ln(2)
+    pdf.cell(0, 7, f"Este compuesto ({tm:.1f} K) se ubica {position}.", new_x="LMARGIN", new_y="NEXT")
+
+    pdf.ln(10)
+
+    # Footer
+    pdf.set_font("Helvetica", "I", 9)
+    pdf.set_text_color(130, 130, 130)
+    pdf.cell(0, 7, "Generado por MeltingPoint API - Competencia Kaggle", new_x="LMARGIN", new_y="NEXT", align="C")
+    pdf.cell(0, 7, "La incertidumbre de +-22.80 K esta validada en datos no vistos.", new_x="LMARGIN", new_y="NEXT", align="C")
+
+    # Output
+    pdf_bytes = pdf.output()
+    buffer = io.BytesIO(pdf_bytes)
+    buffer.seek(0)
+
+    return StreamingResponse(
+        buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=reporte_compuesto_{prediction_id}.pdf"},
     )
