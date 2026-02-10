@@ -1,0 +1,36 @@
+# ============================================
+# MeltingPoint Backend - Docker Compose para SERVER
+# Jala imagen pre-buildeada de Docker Hub
+# ============================================
+# Uso:
+#   1. Cambiar TU_DOCKERHUB_USER por tu usuario real
+#   2. Crear .env.production con tus secrets
+#   3. docker compose -f docker-compose.hub.yml up -d
+# ============================================
+
+services:
+  backend:
+    image: TU_DOCKERHUB_USER/melting-point-backend:latest
+    container_name: melting-point-api
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env.production
+    environment:
+      - MODEL_PATH=/app/backend/models/model.joblib
+      - CHEMPROP_MODEL_DIR=/app/backend/models/model_chemprop
+      - TRAIN_DATASET_PATH=/app/data/raw/train_with_names.csv
+      - TEST_DATASET_PATH=/app/data/raw/test_with_names.csv
+      - TEST_PROCESSED_PATH=/app/data/processed/test_processed.csv
+      - CHEMPROP_PREDICTIONS_PATH=/app/data/processed/test_chemprop_predictions.csv
+      - USER_COMPOUNDS_PATH=/app/backend/data/user_compounds.csv
+    volumes:
+      - user_data:/app/backend/data
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 900M
+
+volumes:
+  user_data:

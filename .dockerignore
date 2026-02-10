@@ -1,0 +1,55 @@
+# Git
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+backend/.venv/
+backend/venv/
+
+# Modelos experimentales (NO necesarios)
+backend/models/chemprop_max/
+backend/models/chemprop_max_precision/
+backend/models/chemprop_v1_max/
+backend/models/chemprop_v2_max/
+backend/models/best_params_v2.json
+
+# Entornos y secretos
+.env
+backend/.env
+*.env
+
+# Scripts de entrenamiento (no necesarios en deploy)
+src/
+submissions/
+notebooks/
+
+# Archivos temporales
+*.log
+*.tmp
+*.bak
+catboost_info/
+reports/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Datos procesados no necesarios
+data/processed/train_rdkit.csv
+data/processed/test_rdkit.csv
+data/processed/chemprop_train.csv
+data/processed/chemprop_test.csv
+data/processed/chemprop_test_preds.csv
+
+# Deploy files (no meter dentro del container)
+deploy/
+docker-compose.yml
+CLAUDE.md
+backend/CLAUDE.md

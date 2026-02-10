@@ -1,3 +1,0 @@
-id,smiles,name,Tm_pred,Tm_celsius,uncertainty,created_at,source,method
-USR_001,O,Water,237.49,-35.66,±23 K,2026-02-06T16:18:06.843462,user_input,combined (cp=20%)
-USR_002,CCO,Ethanol,162.89,-110.26,±23 K,2026-02-07T21:12:29.329196,user_input,combined (cp=20%)
